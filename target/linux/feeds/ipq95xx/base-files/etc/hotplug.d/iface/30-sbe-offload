@@ -1,0 +1,14 @@
+#!/bin/sh
+# SBE1V1K: (re)apply GRO/GSO/TSO when an Ethernet port comes up. The boot
+# script /etc/init.d/sbe-10g-offload runs before every port is up, and a
+# later link bring-up reset GSO on eth1 (seen on 1.0-dev builds).
+[ "$ACTION" = add ] || [ "$ACTION" = ifup ] || exit 0
+case "$DEVICENAME$DEVICE" in
+	*eth0*|*eth1*|*eth2*|*eth3*) ;;
+	*) exit 0 ;;
+esac
+for dev in eth0 eth1 eth2 eth3; do
+	[ -e "/sys/class/net/$dev" ] || continue
+	ethtool -K "$dev" gro on gso on tso on 2>/dev/null || true
+done
+exit 0

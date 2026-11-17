@@ -1,0 +1,58 @@
+From 5f85bd920206eadb0474cca4d7b8a8e0a9a25339 Mon Sep 17 00:00:00 2001
+From: Devi Priya <devipriy@qti.qualcomm.com>
+Date: Fri, 10 Apr 2026 11:11:40 +0530
+Subject: [PATCH] clk: qcom: Add sequence to shut down and Power up APSS PLL
+ during failure
+
+Add support to shut down and power up the APSS PLL during failure
+conditions to evaluate whether this recovery sequence helps address
+PLL enablement failures. This change is intended to aid debugging and
+validation, as the issue is very rarely reproducible.
+
+Change-Id: Ie1030d821556bf65681cc94df95a866500ba0852
+Signed-off-by: Devi Priya <devipriy@qti.qualcomm.com>
+---
+ drivers/clk/qcom/clk-alpha-pll.c | 20 ++++++++++++++++++--
+ 1 file changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/clk/qcom/clk-alpha-pll.c b/drivers/clk/qcom/clk-alpha-pll.c
+index 73a243db741c..b03b528b57ef 100644
+--- a/drivers/clk/qcom/clk-alpha-pll.c
++++ b/drivers/clk/qcom/clk-alpha-pll.c
+@@ -518,6 +518,7 @@ static int clk_alpha_pll_enable(struct clk_hw *hw)
+ 	int ret;
+ 	struct clk_alpha_pll *pll = to_clk_alpha_pll(hw);
+ 	u32 val, mask;
++	static int count;
+ 
+ 	mask = PLL_OUTCTRL | PLL_RESET_N | PLL_BYPASSNL;
+ 	ret = regmap_read(pll->clkr.regmap, PLL_MODE(pll), &val);
+@@ -554,8 +555,23 @@ static int clk_alpha_pll_enable(struct clk_hw *hw)
+ 		return ret;
+ 
+ 	ret = wait_for_pll_enable_lock(pll);
+-	if (ret)
+-		return ret;
++	if (ret) {
++		regmap_read(pll->clkr.regmap, PLL_STATUS(pll), &val);
++
++		pr_info("DBG: PLL_LOCK_DET failed, PLL_STATUS 0x%x\n", val);
++
++		if (count == 0) {
++			count++;
++			pr_info("DBG: Shutting down APSS PLL and powering up\n");
++			/* Shutdown the PLL and bring it up again */
++			regmap_write(pll->clkr.regmap, PLL_MODE(pll), 0x6);
++			regmap_write(pll->clkr.regmap, PLL_MODE(pll), 0);
++			udelay(5);
++			pr_info("DBG: Enabling Alpha PLL\n");
++			ret = clk_alpha_pll_enable(hw);
++			pr_info("DBG: PLL enabled\n");
++		}
++	}
+ 
+ 	ret = regmap_update_bits(pll->clkr.regmap, PLL_MODE(pll),
+ 				 PLL_OUTCTRL, PLL_OUTCTRL);
+-- 
+2.34.1
+

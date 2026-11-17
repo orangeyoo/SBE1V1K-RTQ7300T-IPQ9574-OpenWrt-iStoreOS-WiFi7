@@ -1,0 +1,8 @@
+#!/bin/sh
+# Chinese-first default UI language (2.0).  The translations themselves
+# ship as luci-i18n-*-zh-cn packages (CONFIG_LUCI_LANG_zh_Hans=y in the
+# build config); this only flips the default language switch.  Users can
+# still change it in System -> System -> Language and Appearance.
+uci -q set luci.main.lang='zh_cn'
+uci -q commit luci
+exit 0

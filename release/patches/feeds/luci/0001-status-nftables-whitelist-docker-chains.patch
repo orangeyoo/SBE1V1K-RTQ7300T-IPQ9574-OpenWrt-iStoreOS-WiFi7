@@ -1,0 +1,20 @@
+diff --git a/modules/luci-mod-status/htdocs/luci-static/resources/view/status/nftables.js b/modules/luci-mod-status/htdocs/luci-static/resources/view/status/nftables.js
+index 0013a3a..20d29dd 100644
+--- a/modules/luci-mod-status/htdocs/luci-static/resources/view/status/nftables.js
++++ b/modules/luci-mod-status/htdocs/luci-static/resources/view/status/nftables.js
+@@ -676,6 +676,15 @@ return view.extend({
+ 	},
+ 
+ 	checkLegacyRules: function(ipt4save, ipt6save) {
++		/* Orangeyoo: docker (iptables-nft backend) maintains DOCKER/DOCKER-USER/
++		 * DOCKER-ISOLATION chains through iptables. Those are not user firewall
++		 * rules, so exclude them from the legacy-rules detection. */
++		ipt4save = (ipt4save || '').split('\n').filter(function(l) {
++				return !(/-A DOCKER/.test(l) || /-j DOCKER/.test(l) || /docker0/.test(l) || /172\.17\.0\.0\/16/.test(l) || /physdev-is-bridged/.test(l));
++			}).join('\n');
++		ipt6save = (ipt6save || '').split('\n').filter(function(l) {
++				return !(/-j DOCKER/.test(l) || /docker0/.test(l));
++			}).join('\n');
+ 		if (ipt4save.match(/\n-A /) || ipt6save.match(/\n-A /)) {
+ 			ui.addNotification(_('Legacy rules detected'), [
+ 				E('p', _('There are legacy iptables rules present on the system. Mixing iptables and nftables rules is discouraged and may lead to incomplete traffic filtering.')),

@@ -1,0 +1,38 @@
+#!/bin/sh
+# Wiro SBE1V1K: 6 GHz (band 6g) config purifier, first-boot layer.
+# (Ported from Orangeyoo 1.0 99-6g-sae-sanitizer; adapted to the 2.0
+# mac80211/ath12k stack.)
+#
+# Two classes of config deadlock/refuse on the 6G band for this product:
+#  1) mode=mesh (802.11s)  - not in the product scope; the original vendor
+#     upstream driver had no mesh VAP type at all (osif_create_vap NULL,
+#     VAP loop + PPE VP leak).  On the 2.0 stack mesh stays disabled by
+#     rule, see /etc/init.d/o2-wifi-sanitize and the LuCI hardening.
+#  2) encryption=none or sae* - the 6G band keeps the OWE/open layout
+#     (iron rule: no SAE/WPA3 on 6G; hostapd rejects fully-open 6G VAPs).
+# First boot rewrites: mesh -> ap, sae*/none -> OWE (encryption=owe + PMF).
+for s in $(uci show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+	dev=$(uci get wireless.$s.device 2>/dev/null)
+	band=$(uci get wireless.$dev.band 2>/dev/null)
+	[ "$band" = "6g" ] || [ "$band" = "3" ] || continue
+	mode=$(uci get wireless.$s.mode 2>/dev/null)
+	enc=$(uci get wireless.$s.encryption 2>/dev/null)
+	fixed=""
+	if [ "$mode" = "mesh" ]; then
+		uci set wireless.$s.mode='ap'
+		for o in mesh_id mesh_fwding mesh_rssi_threshold; do
+			uci -q delete wireless.$s.$o
+		done
+		fixed="mesh->ap"
+	fi
+	if [ -z "$enc" ] || [ "$enc" = "none" ] || echo "$enc" | grep -q 'sae'; then
+		uci set wireless.$s.encryption='owe'
+		uci set wireless.$s.ieee80211w='2'
+		for o in sae sae_pwe key owe; do
+			uci -q delete wireless.$s.$o
+		done
+		fixed="$fixed enc->owe"
+	fi
+	[ -n "$fixed" ] && logger -t 6g-sanitizer "$s (band $band): purified:$fixed"
+done
+uci commit wireless

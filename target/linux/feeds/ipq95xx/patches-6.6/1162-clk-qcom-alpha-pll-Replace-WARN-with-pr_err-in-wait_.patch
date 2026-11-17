@@ -1,0 +1,60 @@
+From 257941b334db383c6f11dfbf2523b075778f4b79 Mon Sep 17 00:00:00 2001
+From: Devi Priya <devipriy@qti.qualcomm.com>
+Date: Tue, 28 Apr 2026 10:52:17 +0530
+Subject: [PATCH] clk: qcom: alpha-pll: Replace WARN with pr_err in
+ wait_for_pll()
+
+The wait_for_pll() API currently triggers a WARN when PLL failures
+are detected. Although a recovery sequence exists to power down and
+reinitialize the PLL, enabling panic_on_warn causes the kernel to
+panic, preventing the recovery path from executing.
+
+Replace WARN with pr_err so that PLL failure conditions are logged
+without triggering a kernel panic, allowing the recovery sequence
+to run as intended.
+
+Change-Id: I4443db8f033e7c9deb8850f283c5c76892e74312
+Signed-off-by: Devi Priya <devipriy@qti.qualcomm.com>
+---
+ drivers/clk/qcom/clk-alpha-pll.c | 11 +++--------
+ 1 file changed, 3 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/clk/qcom/clk-alpha-pll.c b/drivers/clk/qcom/clk-alpha-pll.c
+index b03b528b57ef..1d5368d2244a 100644
+--- a/drivers/clk/qcom/clk-alpha-pll.c
++++ b/drivers/clk/qcom/clk-alpha-pll.c
+@@ -341,7 +341,7 @@ static int wait_for_pll(struct clk_alpha_pll *pll, u32 mask, bool inverse,
+ 	}
+ 
+ 	regmap_read(pll->clkr.regmap, PLL_STATUS(pll), &status);
+-	WARN(1, "%s failed to %s! PLL_MODE 0x%x PLL_STATUS 0x%x\n", name, action, val, status);
++	pr_err("%s failed to %s! PLL_MODE 0x%x PLL_STATUS 0x%x\n", name, action, val, status);
+ 	return -ETIMEDOUT;
+ }
+ 
+@@ -556,20 +556,15 @@ static int clk_alpha_pll_enable(struct clk_hw *hw)
+ 
+ 	ret = wait_for_pll_enable_lock(pll);
+ 	if (ret) {
+-		regmap_read(pll->clkr.regmap, PLL_STATUS(pll), &val);
+-
+-		pr_info("DBG: PLL_LOCK_DET failed, PLL_STATUS 0x%x\n", val);
+-
+ 		if (count == 0) {
+ 			count++;
+-			pr_info("DBG: Shutting down APSS PLL and powering up\n");
++			pr_err("Shutting down APSS PLL and powering up\n");
+ 			/* Shutdown the PLL and bring it up again */
+ 			regmap_write(pll->clkr.regmap, PLL_MODE(pll), 0x6);
+ 			regmap_write(pll->clkr.regmap, PLL_MODE(pll), 0);
+ 			udelay(5);
+-			pr_info("DBG: Enabling Alpha PLL\n");
+ 			ret = clk_alpha_pll_enable(hw);
+-			pr_info("DBG: PLL enabled\n");
++			pr_err("PLL enabled successfully!\n");
+ 		}
+ 	}
+ 
+-- 
+2.34.1
+

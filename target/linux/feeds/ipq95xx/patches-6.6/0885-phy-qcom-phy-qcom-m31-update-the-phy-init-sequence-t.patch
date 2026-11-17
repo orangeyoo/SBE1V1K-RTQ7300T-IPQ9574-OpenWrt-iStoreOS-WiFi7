@@ -1,0 +1,31 @@
+From 081ed4d518fe1ed96947c0231fe028e74123c7ab Mon Sep 17 00:00:00 2001
+From: Kathiravan Thirumoorthy <quic_kathirav@quicinc.com>
+Date: Wed, 14 May 2025 15:43:25 +0530
+Subject: [PATCH] phy: qcom: phy-qcom-m31: update the phy init sequence to meet
+ complaince test
+
+This patch adds the XCFG configuration for improving the
+performance in the USB compliance test
+
+Adjust HSTX slew rate from 565 ps to 400 ps
+Adjust Manual control ODT value from 45.02 Ohm to 33.97 ohm
+Adjust HSTX Current of current-mode driver, 17.1mA * 22.5ohm = 385mV
+
+Change-Id: I4ce5d3eaf507e90c246d11695df49ad817ccd992
+Signed-off-by: Kathiravan Thirumoorthy <quic_kathirav@quicinc.com>
+---
+ drivers/phy/qualcomm/phy-qcom-m31.c | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+Index: linux-6.6.116/drivers/phy/qualcomm/phy-qcom-m31.c
+===================================================================
+--- linux-6.6.116.orig/drivers/phy/qualcomm/phy-qcom-m31.c	2026-01-27 00:47:47.690886636 +0530
++++ linux-6.6.116/drivers/phy/qualcomm/phy-qcom-m31.c	2026-01-27 00:51:56.699705100 +0530
+@@ -138,6 +138,7 @@
+ 	{
+ 		USB2PHY_USB_PHY_M31_XCFGI_9,
+ 		HSTX_CURRENT_17_1MA_385MV,
++		0
+ 	},
+ 	{
+ 		USB_PHY_UTMI_CTRL5,

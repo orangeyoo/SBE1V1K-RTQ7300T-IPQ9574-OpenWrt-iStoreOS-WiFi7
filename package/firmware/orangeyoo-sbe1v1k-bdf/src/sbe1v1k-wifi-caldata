@@ -1,0 +1,33 @@
+#!/bin/sh
+# SBE1V1K START=01 (before boot(10) kmodloader):
+# 1) write cal-pci-*.bin (from own ART) into the ath12k fork firmware dir
+#    - b9/b12 verified: QMI caldata download succeeds, phyrf_bdf_v2.c:604
+#      mission-mode assert stays gone.
+# 2) PPE-DS (Wi-Fi direct switch into the PPE) is enabled: the EDMA node
+#    declares 3 PPE-DS nodes, one per QCN9224 (ipq9574-sbe1v1k.dts).
+#    Images up to 1.0-rc2 appended "options ath12k ppe_ds_enable=0" to
+#    /etc/modules.conf (kept across sysupgrade); remove it so the driver
+#    default (1) applies. To switch PPE-DS off for diagnosis:
+#      touch /etc/sbe1v1k-ppe-ds-off
+#      echo 'options ath12k ppe_ds_enable=0' >> /etc/modules.conf; reboot
+#    (kmodloader reads module options only from /etc/modules.conf; the
+#    marker file stops this script from removing the line again).
+
+START=01
+
+sbe1v1k_caldata_boot() {
+	. /lib/sbe1v1k-caldata-lib.sh 2>/dev/null || return 1
+	sbe1v1k_write_cal_pci
+}
+
+sbe1v1k_ppe_ds_default() {
+	local f=/etc/modules.conf
+	[ -e /etc/sbe1v1k-ppe-ds-off ] && return 0	# explicit opt-out marker
+	grep -q '^options ath12k ppe_ds_enable=0$' "$f" 2>/dev/null || return 0
+	sed -i '/^options ath12k ppe_ds_enable=0$/d' "$f"
+	echo "sbe1v1k-caldata: removed legacy ppe_ds_enable=0 from $f" > /dev/console 2>/dev/null
+}
+
+sbe1v1k_caldata_boot
+sbe1v1k_ppe_ds_default
+exit 0

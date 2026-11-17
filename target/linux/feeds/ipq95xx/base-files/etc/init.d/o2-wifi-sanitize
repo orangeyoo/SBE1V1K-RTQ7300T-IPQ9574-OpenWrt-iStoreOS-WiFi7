@@ -1,0 +1,61 @@
+#!/bin/sh /etc/rc.common
+# Wiro SBE1V1K: 6 GHz (band 6g) wireless config purifier - runtime layer.
+#
+# Orangeyoo 1.0 shipped a two-layer purifier:
+#   layer 1 = uci-defaults first-boot pass (99-6g-sae-sanitizer here)
+#   layer 2 = pre-wifi-config pass on EVERY boot (inside 1.0's
+#             qcawifi-config-cmd boot_wifi)
+# This script is the 2.0 layer 2: it runs before netifd brings the
+# radios up (START=15, network is START=20) and re-corrects anything
+# that re-introduced mesh/SAE/open on the 6G band (restored backup,
+# user edit, LuCI drift).  mesh/802.11s and SAE/WPA3 stay out of the
+# product scope on 6G; the band keeps the OWE/open layout per iron
+# rule #7 (hostapd rejects a fully-open 6G VAP, so "open" lands as OWE).
+START=15
+USE_PROCD=0
+
+sanitize() {
+	[ -s /etc/config/wireless ] || return 0
+	for s in $(uci show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+		dev=$(uci get wireless.$s.device 2>/dev/null)
+		band=$(uci get wireless.$dev.band 2>/dev/null)
+		[ "$band" = "6g" ] || [ "$band" = "3" ] || continue
+		mode=$(uci get wireless.$s.mode 2>/dev/null)
+		enc=$(uci get wireless.$s.encryption 2>/dev/null)
+		fixed=""
+		if [ "$mode" = "mesh" ]; then
+			uci set wireless.$s.mode='ap'
+			for o in mesh_id mesh_fwding mesh_rssi_threshold; do
+				uci -q delete wireless.$s.$o
+			done
+			fixed="mesh->ap"
+		fi
+		if [ -z "$enc" ] || [ "$enc" = "none" ] || echo "$enc" | grep -q 'sae'; then
+			uci set wireless.$s.encryption='ccmp'
+			uci set wireless.$s.owe='1'
+			uci set wireless.$s.ieee80211w='2'
+			for o in sae sae_pwe key; do
+				uci -q delete wireless.$s.$o
+			done
+			fixed="$fixed enc->owe"
+		fi
+		[ -n "$fixed" ] && {
+			uci commit wireless
+			logger -t 6g-sanitizer "boot pass: band $band $s purified:$fixed"
+		}
+	done
+}
+
+start() {
+	# 6G(band3) purification - mesh/SAE deadlock the original vendor
+	# upstream driver chain; correct before netifd applies the config.
+	sanitize
+}
+
+restart() {
+	start
+}
+
+stop() {
+	:
+}

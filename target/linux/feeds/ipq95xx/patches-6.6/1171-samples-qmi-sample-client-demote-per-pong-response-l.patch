@@ -1,0 +1,33 @@
+From 0dfe901948d41790fe0bea65a8deb1da59b8fcae Mon Sep 17 00:00:00 2001
+From: Manikanta Mylavarapu <mmanikan@qti.qualcomm.com>
+Date: Tue, 28 Apr 2026 14:48:43 +0530
+Subject: [PATCH] samples: qmi: sample-client: demote per-pong response log to
+ debug
+
+The QMI sample client prints a "Response for ping" message for every pong. Under stress runs with multiple threads/clients, this results in tens of thousands of info-level messages, leading to excessive console output and unnecessary overhead.
+
+Switch the per-pong response message from pr_info() to pr_debug() so the
+output remains available when debugging, while keeping normal runs quiet.
+
+Change-Id: I69a0f8f53131da34a950e4815d80e1ed22080f1c
+Signed-off-by: Manikanta Mylavarapu <mmanikan@qti.qualcomm.com>
+---
+ samples/qmi/qmi_sample_client.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/samples/qmi/qmi_sample_client.c b/samples/qmi/qmi_sample_client.c
+index 5139d1c91001..0613178d1846 100644
+--- a/samples/qmi/qmi_sample_client.c
++++ b/samples/qmi/qmi_sample_client.c
+@@ -576,7 +576,7 @@ static void ping_pong_cb(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
+ 	else if (!resp->pong_valid || memcmp(resp->pong, "pong", 4))
+ 		txn->result = -EINVAL;
+ 
+-	pr_info("Response for ping from %d:%d handle[%p] is %s\n",
++	pr_debug("Response for ping from %d:%d handle[%p] is %s\n",
+ 			qmi->sq.sq_port, qmi->sq.sq_node, qmi, resp->pong);
+ 	complete(&txn->completion);
+ }
+-- 
+2.34.1
+

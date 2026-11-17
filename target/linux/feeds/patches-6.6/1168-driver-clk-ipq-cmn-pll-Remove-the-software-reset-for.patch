@@ -1,0 +1,31 @@
+From eccbd4f48b9cef7dcba3cdc663077a98e7bd1b42 Mon Sep 17 00:00:00 2001
+From: Luo Jie <luoj@qti.qualcomm.com>
+Date: Wed, 6 May 2026 11:21:40 +0800
+Subject: [PATCH] driver: clk: ipq-cmn-pll: Remove the software reset for the
+ EPHY clock
+
+Change-Id: I87637e5633d26b033802dd4baf205923420626c8
+Signed-off-by: Luo Jie <luoj@qti.qualcomm.com>
+---
+ drivers/clk/qcom/ipq-cmn-pll.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/drivers/clk/qcom/ipq-cmn-pll.c b/drivers/clk/qcom/ipq-cmn-pll.c
+index e644f324a58c..e06aac7a1e39 100644
+--- a/drivers/clk/qcom/ipq-cmn-pll.c
++++ b/drivers/clk/qcom/ipq-cmn-pll.c
+@@ -970,10 +970,7 @@ static int clk_ephy_raw_set_rate(struct clk_hw *hw, unsigned long rate,
+ 				      CMN_PLL_PON_CONFIG,
+ 				      CMN_PLL_GEPHY_312P5M_125M_SEL);
+ 
+-	if (ret)
+-		return ret;
+-
+-	return clk_cmn_pll_ana_soft_reset(ephy_raw_clk->regmap);
++	return ret;
+ }
+ 
+ static const struct clk_ops clk_ephy_raw_ops = {
+-- 
+2.34.1
+

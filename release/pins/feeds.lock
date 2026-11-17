@@ -1,0 +1,7 @@
+# name       upstream                                          commit
+# OpenWrt 24.10 feeds, pinned to the exact commits the 2.0-pre36 build used.
+# Local feed changes live in release/patches/feeds/<name>/ (applied by release/feeds.sh).
+packages   https://git.openwrt.org/feed/packages.git        2bda86e20fbc4db787d2f1b2e0679c2dd545ac21
+luci       https://git.openwrt.org/project/luci.git         aa4865e8e6472d6ba68e541688065fc2235bbd83
+routing    https://git.openwrt.org/feed/routing.git         00619bc7bc60d8b67ecc490121e45298b122cd6e
+telephony  https://git.openwrt.org/feed/telephony.git       695f4f4a733dfaf10922d24bf9dbdfd509b8a6d4

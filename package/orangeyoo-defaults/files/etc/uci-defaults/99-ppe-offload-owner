@@ -1,0 +1,27 @@
+#!/bin/sh
+# Orangeyoo 2.0: keep ECM/PPE as the sole connection-acceleration owner.
+#
+# Why: OpenWrt fw4 enables nftables SW flowtable (firewall.defaults
+# flow_offloading) which captures routed flows after ~4 packets and routes
+# them through the kernel flowtable fast path. That pre-empts the QSDK ECM
+# machinery: ECM/PPE never becomes the acceleration owner (live pre27
+# evidence: ecm_ppe_ipv4 tcp_accelerated_count stuck at 0 with flowtable on,
+# and A/B forwarding on the 10G-LAN<->2.5G-WAN topology measured 2026-11-10:
+#   flow_offloading=1 : LAN->WAN P4 1.04 Gbps, WAN->LAN P4 2.00 Gbps
+#   flow_offloading=0 : LAN->WAN P4 1.49 Gbps (+43%), WAN->LAN P4 2.09 Gbps
+# The vendor stack (OEM 5.4) has no fw4 flowtable - acceleration ownership
+# by ECM/PPE is the design intent.
+#
+# IMPORTANT: flipping firewall uci alone is NOT persistent - the turboacc
+# init script re-applies firewall.defaults flow_offloading from
+# /etc/config/turboacc on every boot (pre28 first-boot evidence: uci-defaults
+# set 0, turboacc init set it back to 1). The turboacc config IS the source
+# of truth, so disable both switches there; turboacc's own init then keeps
+# the firewall defaults at 0 on every subsequent boot.
+uci -q set turboacc.config.sw_flow='0'
+uci -q set turboacc.config.hw_flow='0'
+uci -q set firewall.@defaults[0].flow_offloading='0'
+uci -q set firewall.@defaults[0].flow_offloading_hw='0'
+uci commit turboacc
+uci commit firewall
+exit 0
