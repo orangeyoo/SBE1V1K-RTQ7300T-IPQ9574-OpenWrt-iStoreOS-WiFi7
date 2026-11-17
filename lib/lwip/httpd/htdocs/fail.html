@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wiro U-Boot 1.5 · Recovery Error</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{min-height:100svh;margin:0;display:grid;place-items:center;color:#F2F5FA;background:#05060A;font:13px/1.8 "Microsoft YaHei","PingFang SC",system-ui,sans-serif}.panel{max-width:540px;margin:24px;padding:32px;border:1px solid rgba(255,255,255,.09);border-radius:14px;background:#0D0F15}.mark{display:block;color:#FF6B7A;font-size:12px;letter-spacing:2px;margin-bottom:22px}h1{font-size:24px;font-weight:600;margin:0 0 16px}p{color:#8D97A7;margin:0 0 14px}.back{display:inline-flex;align-items:center;min-height:44px;margin-top:12px;padding:8px 18px;border:1px solid #FF2E4C;border-radius:7px;color:#05060A;background:#FF2E4C;text-decoration:none;font-weight:600}.back:focus-visible{outline:2px solid #FF6B7A;outline-offset:4px}.back:hover{background:#FF6B7A}
+</style>
+</head>
+<body>
+  <div class="panel">
+    <span class="mark">WIRO · U-BOOT 1.5</span>
+    <h1 id="title">操作被拒绝</h1>
+    <p id="detail">The recovery server refused this operation. Check the selected target and image file, then review the serial console for details.</p>
+    <a id="back" class="back" href="/index.html">Return to recovery console</a>
+  </div>
+<script>
+var en=false;try{en=localStorage.getItem("sbe1v1k-language")==="en"}catch(e){}
+document.documentElement.lang=en?"en":"zh-CN";
+document.getElementById("title").textContent=en?"Operation rejected":"操作被拒绝";
+document.getElementById("detail").textContent=en?"The recovery server refused this operation. Check the target and image, then review the serial console. If an erase or write may still be running, keep power connected and inspect its status before retrying.":"恢复服务拒绝了本次操作。请检查目标分区与镜像，并查看串口日志。如果擦除或写入可能仍在进行，请保持供电，先确认设备状态，不要直接重试。";
+document.getElementById("back").textContent=en?"Return to recovery console":"返回恢复控制台";
+</script>
+</body>
+</html>
