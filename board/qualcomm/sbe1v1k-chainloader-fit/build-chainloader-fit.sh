@@ -1,0 +1,175 @@
+#!/usr/bin/env sh
+# Copyright (c) 2026 Orangeyoo <Orangeyoo@50848>
+set -eu
+
+usage() {
+	cat <<'EOF'
+Usage:
+  build-chainloader-fit.sh \
+    [--payload <u-boot.bin>] \
+    [--outdir <dir>] \
+    [--cc <aarch64-gcc>] \
+    [--objcopy <aarch64-objcopy>] \
+    [--dtc <dtc>] \
+	[--mkimage <mkimage>] \
+	[--dumpimage <dumpimage>]
+
+Builds a stock-bootm compatible SBE1V1K raw chainloader FIT. An Askey HLOS
+ELF wrapper is also emitted for inspection, but it is not the default install
+format.
+EOF
+}
+
+payload=
+outdir=
+cc="${CC:-aarch64-linux-gnu-gcc}"
+objcopy="${OBJCOPY:-aarch64-linux-gnu-objcopy}"
+dtc="${DTC:-dtc}"
+mkimage=
+dumpimage=
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		--payload) payload="$2"; shift 2 ;;
+		--outdir) outdir="$2"; shift 2 ;;
+		--cc) cc="$2"; shift 2 ;;
+		--objcopy) objcopy="$2"; shift 2 ;;
+		--dtc) dtc="$2"; shift 2 ;;
+		--mkimage) mkimage="$2"; shift 2 ;;
+		--dumpimage) dumpimage="$2"; shift 2 ;;
+		-h|--help) usage; exit 0 ;;
+		*) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+	esac
+done
+
+abspath() {
+	dir=$(CDPATH= cd -- "$(dirname -- "$1")" && pwd)
+	base=$(basename -- "$1")
+	printf '%s/%s\n' "$dir" "$base"
+}
+
+print_artifact_info() {
+	python3 - "$@" <<'PY'
+import hashlib
+import re
+import sys
+from pathlib import Path
+
+paths = [Path(arg) for arg in sys.argv[1:]]
+
+for path in paths:
+    data = path.read_bytes()
+    print(f"SHA256 {hashlib.sha256(data).hexdigest()}  {path}")
+
+    if path.name.endswith(".itb"):
+        banners = []
+        for match in re.finditer(rb"U-Boot [0-9][ -~]{1,120}", data):
+            banner = match.group(0).decode("ascii", "replace").strip()
+            if banner not in banners:
+                banners.append(banner)
+        for banner in banners:
+            print(f"Embedded banner: {banner}")
+PY
+}
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+srctree=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+objtree="$srctree"
+
+[ -n "$payload" ] || payload="$objtree/u-boot.bin"
+[ -n "$outdir" ] || outdir="$objtree/sbe1v1k-chainloader"
+[ -n "$mkimage" ] || mkimage="$objtree/tools/mkimage"
+[ -n "$dumpimage" ] || dumpimage="$objtree/tools/dumpimage"
+
+cc_path=$(command -v "$cc" 2>/dev/null || true)
+objcopy_path=$(command -v "$objcopy" 2>/dev/null || true)
+dtc_path=$(command -v "$dtc" 2>/dev/null || true)
+[ -n "$dtc_path" ] || dtc_path="$objtree/scripts/dtc/dtc"
+
+[ -n "$cc_path" ] || { echo "Compiler not found: $cc" >&2; exit 1; }
+[ -n "$objcopy_path" ] || { echo "Objcopy not found: $objcopy" >&2; exit 1; }
+[ -x "$dtc_path" ] || { echo "dtc not executable: $dtc_path" >&2; exit 1; }
+[ -x "$mkimage" ] || { echo "mkimage not executable: $mkimage" >&2; exit 1; }
+[ -x "$dumpimage" ] || { echo "dumpimage not executable: $dumpimage" >&2; exit 1; }
+[ -f "$payload" ] || { echo "Missing payload: $payload" >&2; exit 1; }
+
+mkdir -p "$outdir"
+payload=$(abspath "$payload")
+
+shim_elf="$outdir/sbe1v1k-chainloader-shim.elf"
+shim_bin="$outdir/sbe1v1k-chainloader-shim.bin"
+shim_map="$outdir/sbe1v1k-chainloader-shim.map"
+control_dtb="$outdir/sbe1v1k-chainloader-control.dtb"
+output_fit="$outdir/sbe1v1k-chainloader.itb"
+output_partition="$outdir/sbe1v1k-chainloader-partition.img"
+output_hlos="$outdir/sbe1v1k-chainloader-hlos.elf"
+partition_size=$((4 * 1024 * 1024))
+
+cflags="
+	-Os
+	-march=armv8-a
+	-ffreestanding
+	-fno-builtin
+	-fno-stack-protector
+	-fno-asynchronous-unwind-tables
+	-fno-unwind-tables
+	-fno-pic
+	-nostdlib
+	-nostartfiles
+	-nodefaultlibs
+	-Wall
+	-Wextra
+	-Werror
+	-I$srctree/scripts/dtc/libfdt
+"
+
+"$cc_path" $cflags \
+	-T "$script_dir/shim/sbe1v1k-chainloader.lds" \
+	-Wl,-Map,"$shim_map" \
+	-Wl,--build-id=none \
+	-o "$shim_elf" \
+	"$script_dir/shim/start.S" \
+	"$script_dir/shim/main.c" \
+	"$script_dir/shim/runtime.c" \
+	"$srctree/scripts/dtc/libfdt/fdt.c" \
+	"$srctree/scripts/dtc/libfdt/fdt_ro.c"
+
+"$objcopy_path" -O binary "$shim_elf" "$shim_bin"
+"$dtc_path" -I dts -O dtb -o "$control_dtb" \
+	"$script_dir/shim/sbe1v1k-chainloader-control.dts"
+
+shim_bin=$(abspath "$shim_bin")
+control_dtb=$(abspath "$control_dtb")
+
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT INT TERM
+its="$tmpdir/sbe1v1k-chainloader.its"
+
+sed \
+	-e "s|__DTB__|$control_dtb|g" \
+	-e "s|__SHIM__|$shim_bin|g" \
+	-e "s|__PAYLOAD__|$payload|g" \
+	"$script_dir/sbe1v1k-chainloader.its.in" > "$its"
+
+"$mkimage" -f "$its" "$output_fit"
+fit_size=$(wc -c < "$output_fit")
+if [ "$fit_size" -gt "$partition_size" ]; then
+	echo "Chainloader FIT is too large for the 4 MiB partition: $fit_size bytes" >&2
+	exit 1
+fi
+
+dd if=/dev/zero of="$output_partition" bs=1048576 count=4 2>/dev/null
+dd if="$output_fit" of="$output_partition" conv=notrunc 2>/dev/null
+"$dumpimage" -l "$output_fit"
+python3 "$script_dir/wrap-hlos-elf.py" \
+	--input "$output_fit" \
+	--output "$output_hlos"
+
+echo
+echo "Generated FIT:  $output_fit"
+echo "Generated partition image: $output_partition"
+echo "Generated HLOS: $output_hlos"
+echo "Generated shim: $shim_bin"
+echo "Generated DTB:  $control_dtb"
+print_artifact_info "$output_fit" "$output_partition" "$output_hlos" \
+	"$shim_bin" "$control_dtb" "$payload"
