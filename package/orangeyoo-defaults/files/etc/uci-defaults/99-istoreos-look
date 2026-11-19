@@ -1,0 +1,6 @@
+#!/bin/sh
+# iStoreOS look: argon theme as the LuCI base + default landing.
+uci -q set luci.main.mediaurlbase='/luci-static/argon'
+uci -q commit luci
+rm -f /tmp/luci-modulecache/ /tmp/luci-indexcache
+exit 0

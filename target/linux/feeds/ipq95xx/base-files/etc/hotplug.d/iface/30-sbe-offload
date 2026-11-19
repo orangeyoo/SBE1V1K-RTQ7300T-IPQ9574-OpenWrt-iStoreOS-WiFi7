@@ -1,0 +1,13 @@
+#!/bin/sh
+# SBE1V1K: (re)apply GRO/GSO/TSO on the LAN. Do not write WAN features
+# after boot: ethtool -K can reset the live nss-dp link.
+[ "$ACTION" = add ] || [ "$ACTION" = ifup ] || exit 0
+case "$DEVICENAME$DEVICE" in
+	*eth0*|*eth2*|*eth3*) ;;
+	*) exit 0 ;;
+esac
+for dev in eth0 eth2 eth3; do
+	[ -e "/sys/class/net/$dev" ] || continue
+	ethtool -K "$dev" gro on gso on tso on 2>/dev/null || true
+done
+exit 0

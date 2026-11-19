@@ -1,0 +1,38 @@
+From d0c074eaf4df24ebd31b2cec580bdd775ef73f54 Mon Sep 17 00:00:00 2001
+From: Vignesh Viswanathan <viswanat@qti.qualcomm.com>
+Date: Fri, 10 Apr 2026 00:30:02 +0530
+Subject: [PATCH] Revert "mhi: host: Add standard elf image download
+ functionality"
+
+This reverts commit 6b66aa252e6b7b834d91794da975d9ebabaf4535.
+
+Keep the standard_elf_image flag in the mhi_controller structure for
+now, as client drivers are using this and it would break compilation.
+
+Change-Id: Ibc8b9f681b6e3b87ab512c109f0b7bd8d338d228
+Signed-off-by: Vignesh Viswanathan <viswanat@qti.qualcomm.com>
+---
+ drivers/bus/mhi/host/boot.c | 7 -------
+ 1 file changed, 7 deletions(-)
+
+diff --git a/drivers/bus/mhi/host/boot.c b/drivers/bus/mhi/host/boot.c
+index 3c451bd60bd0..4980000bf28b 100644
+--- a/drivers/bus/mhi/host/boot.c
++++ b/drivers/bus/mhi/host/boot.c
+@@ -607,13 +607,6 @@ void mhi_fw_load_handler(struct mhi_controller *mhi_cntrl)
+ 	 * device transitioning into MHI READY state
+ 	 */
+ 	if (mhi_cntrl->fbc_download) {
+-		dev_dbg(dev, "standard_elf_image:%s\n",
+-			(mhi_cntrl->standard_elf_image ? "True" : "False"));
+-		if (mhi_cntrl->standard_elf_image) {
+-			fw_data += mhi_cntrl->sbl_size;
+-			fw_sz -= mhi_cntrl->sbl_size;
+-		}
+-
+ 		ret = mhi_alloc_bhie_table(mhi_cntrl, &mhi_cntrl->fbc_image, fw_sz,
+ 					   IMG_TYPE_FBC);
+ 		if (ret) {
+-- 
+2.34.1
+

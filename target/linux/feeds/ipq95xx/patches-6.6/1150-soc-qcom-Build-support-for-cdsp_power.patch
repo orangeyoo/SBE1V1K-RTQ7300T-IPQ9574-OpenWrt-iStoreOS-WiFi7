@@ -1,0 +1,53 @@
+From 25e8ce3c9b02f9941ffa87b63dd985473fe0b329 Mon Sep 17 00:00:00 2001
+From: Praveenkumar I <ipkumar@qti.qualcomm.com>
+Date: Thu, 5 Feb 2026 18:59:22 +0530
+Subject: [PATCH] soc: qcom: Build support for cdsp_power
+
+Change-Id: Id53aaf937971f8f8d47c7082bac89ddf62de3119
+Signed-off-by: Praveenkumar I <ipkumar@qti.qualcomm.com>
+---
+ drivers/soc/qcom/Kconfig  | 18 ++++++++++++++++++
+ drivers/soc/qcom/Makefile |  1 +
+ 2 files changed, 19 insertions(+)
+
+diff --git a/drivers/soc/qcom/Kconfig b/drivers/soc/qcom/Kconfig
+index 9a20f387a232..23d846a286c0 100644
+--- a/drivers/soc/qcom/Kconfig
++++ b/drivers/soc/qcom/Kconfig
+@@ -422,6 +422,24 @@ config QCOM_QDSS_BRIDGE
+ 	  MHI and USB interface.
+ 	  If unsure, say N.
+ 
++config QCOM_CDSP_POWER
++	tristate "Qualcomm CDSP Power Management driver"
++	depends on ARCH_QCOM || COMPILE_TEST
++	depends on QCOM_SMEM
++	depends on QCOM_SMP2P
++	depends on REGULATOR
++	help
++	  This driver manages power for the CDSP (Compute DSP) subsystem on
++	  Qualcomm platforms. It handles DCVS (Dynamic Clock and Voltage Scaling)
++	  for voltage scaling via SMEM/SMP2P, and LPM (Low Power Mode) for power
++	  collapse/restore via MPM handshake.
++
++	  The driver coordinates with the cdsp_rproc driver for shared regulator
++	  access and provides runtime voltage scaling and power management for
++	  the CDSP subsystem.
++
++	  Say M here if you want to include support for CDSP power management.
++
+ source "drivers/soc/qcom/tmelcom/Kconfig"
+ 
+ endmenu
+diff --git a/drivers/soc/qcom/Makefile b/drivers/soc/qcom/Makefile
+index fa336697d135..253d6cd277e0 100644
+--- a/drivers/soc/qcom/Makefile
++++ b/drivers/soc/qcom/Makefile
+@@ -49,3 +49,4 @@ obj-$(CONFIG_QCOM_TMELCOM) += tmelcom/
+ obj-$(CONFIG_QCOM_TMEL_LOG) += tmel_log.o
+ CFLAGS_qdss_bridge.o += -Wno-error=format
+ obj-$(CONFIG_QCOM_QDSS_BRIDGE)	+= qdss_bridge.o
++obj-$(CONFIG_QCOM_CDSP_POWER) += cdsp_power.o
+-- 
+2.34.1
+

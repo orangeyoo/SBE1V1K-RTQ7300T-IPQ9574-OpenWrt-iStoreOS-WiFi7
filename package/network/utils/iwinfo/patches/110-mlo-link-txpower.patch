@@ -1,0 +1,40 @@
+From: Orangeyoo@50848
+Subject: iwinfo: report TX power of MLO link interfaces
+
+On a multi-link (MLD) interface nl80211 puts NL80211_ATTR_WIPHY_TX_POWER_LEVEL
+inside NL80211_ATTR_MLO_LINKS instead of at the top level, so LuCI showed
+0 dBm. Fall back to the highest per-link value.
+
+---
+diff --git a/iwinfo_nl80211.c b/iwinfo_nl80211.c
+index 373e846..a3339b7 100644
+--- a/iwinfo_nl80211.c
++++ b/iwinfo_nl80211.c
+@@ -1549,7 +1549,27 @@ static int nl80211_get_txpower_cb(struct nl_msg *msg, void *arg)
+ 	struct nlattr **tb = nl80211_parse(msg);
+ 
+ 	if (tb[NL80211_ATTR_WIPHY_TX_POWER_LEVEL])
++	{
+ 		*buf = iwinfo_mbm2dbm(nla_get_u32(tb[NL80211_ATTR_WIPHY_TX_POWER_LEVEL]));
++	}
++	else if (tb[NL80211_ATTR_MLO_LINKS])
++	{
++		/* MLD interfaces report TX power per link only; use the highest */
++		struct nlattr *link_tb[NL80211_ATTR_MAX + 1];
++		struct nlattr *link;
++		int rem, dbm;
++
++		nla_for_each_nested(link, tb[NL80211_ATTR_MLO_LINKS], rem)
++		{
++			if (nla_parse_nested(link_tb, NL80211_ATTR_MAX, link, NULL) ||
++			    !link_tb[NL80211_ATTR_WIPHY_TX_POWER_LEVEL])
++				continue;
++
++			dbm = iwinfo_mbm2dbm(nla_get_u32(link_tb[NL80211_ATTR_WIPHY_TX_POWER_LEVEL]));
++			if (dbm > *buf)
++				*buf = dbm;
++		}
++	}
+ 
+ 	return NL_SKIP;
+ }

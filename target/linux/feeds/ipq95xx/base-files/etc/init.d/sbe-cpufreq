@@ -1,0 +1,20 @@
+#!/bin/sh /etc/rc.common
+# SBE1V1K: CPU frequency policy as the OEM firmware sets it (powerctl,
+# ipq9574_power_auto for ap-al* boards): ondemand, 1 s sampling, hold the
+# raised frequency for 10 samples, scale up above 50% load. The kernel
+# default governor stays performance so boot runs at full speed.
+START=98
+
+start() {
+	local p g
+	for p in /sys/devices/system/cpu/cpufreq/policy*; do
+		[ -w "$p/scaling_governor" ] && echo ondemand > "$p/scaling_governor"
+	done
+	for g in /sys/devices/system/cpu/cpufreq/ondemand /sys/devices/system/cpu/cpufreq/policy*/ondemand; do
+		[ -d "$g" ] || continue
+		echo 1000000 > "$g/sampling_rate"
+		echo 10 > "$g/sampling_down_factor"
+		echo 50 > "$g/up_threshold"
+	done
+	logger -t sbe-cpufreq "governor $(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null)"
+}

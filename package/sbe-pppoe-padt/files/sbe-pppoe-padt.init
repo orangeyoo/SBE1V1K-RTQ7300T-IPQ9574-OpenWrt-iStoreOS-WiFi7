@@ -1,0 +1,29 @@
+#!/bin/sh /etc/rc.common
+# SBE1V1K: drop a PPPoE session left over from an unclean shutdown before
+# the WAN dials again. /etc/ppp/ip-up.d/50-sbe-pppoe-session records the
+# session on every connect and ip-down removes it on a clean disconnect,
+# so a record present at boot means the BRAS still holds that session and
+# would refuse the new dial ("Access number is exceed") until it times out.
+START=19
+
+STATE=/etc/sbe-pppoe-session
+
+start() {
+	local dev sid mac n=0
+
+	[ -s $STATE ] || return 0
+	read dev sid mac < $STATE
+	rm -f $STATE
+	[ -n "$dev" ] && [ -n "$sid" ] && [ -n "$mac" ] || return 0
+
+	ip link set "$dev" up 2>/dev/null
+	while [ "$(cat /sys/class/net/$dev/carrier 2>/dev/null)" != 1 ] && [ $n -lt 20 ]; do
+		sleep 1
+		n=$((n + 1))
+	done
+	if /usr/sbin/pppoe-padt "$dev" "$sid" "$mac"; then
+		logger -t sbe-pppoe-padt "sent PADT for stale session $sid on $dev"
+	else
+		logger -t sbe-pppoe-padt "could not send PADT for session $sid on $dev"
+	fi
+}

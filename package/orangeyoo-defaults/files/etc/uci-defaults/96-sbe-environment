@@ -1,0 +1,55 @@
+#!/bin/sh
+# SBE1V1K first-boot environment defaults (runs once per install/upgrade).
+
+# Package feeds. The build's libc arch (aarch64_cortex-a73_neon-vfpv4) exists
+# on neither downloads.openwrt.org nor istore.istoreos.com, and the generated
+# distfeeds pointed at non-existent 24.10-SNAPSHOT / QCA paths: every opkg
+# update timed out, the OpenClash updater looped and iStore had nothing to
+# install. The A73 runs aarch64_cortex-a53/aarch64_generic userspace, so
+# accept those archs and use the OpenWrt 24.10 a53 feeds.
+#
+# Those generic feeds carry no target packages, so any iStore app depending on
+# one (block-mount, every kmod-*) failed to install. sbe_core is the target
+# feed of this very build, shipped inside the image by release/build.sh; it is
+# the only source of kernel modules matching this kernel, and opkg verifies
+# its index with the build pubkey already present in /etc/opkg/keys.
+REL=24.10.4
+OWRT=https://downloads.openwrt.org/releases/$REL/packages/aarch64_cortex-a53
+grep -q '^arch aarch64_cortex-a53 ' /etc/opkg.conf || cat >> /etc/opkg.conf <<EOF
+arch all 1
+arch noarch 1
+arch aarch64_generic 5
+arch aarch64_cortex-a53 10
+arch aarch64_cortex-a73_neon-vfpv4 20
+EOF
+cat > /etc/opkg/distfeeds.conf <<EOF
+src/gz sbe_core file:///usr/lib/sbe-core-feed
+src/gz openwrt_base $OWRT/base
+src/gz openwrt_luci $OWRT/luci
+src/gz openwrt_packages $OWRT/packages
+src/gz openwrt_routing $OWRT/routing
+src/gz openwrt_telephony $OWRT/telephony
+EOF
+
+# No "planb" fallback interface: quickstart's DHNS took a DHCP lease from an
+# upstream network plugged into a LAN port and joined the two networks
+# (planb + dheth0 in br-lan). It confused users and leaked DHCP/RA.
+uci -q set quickstart.main.disable_dhns='1' && uci -q commit quickstart
+uci -q delete network.planb
+for d in $(uci -q show network | sed -n "s/^\(network\.@device\[[0-9]*\]\)\.name='br-lan'$/\1/p"); do
+	uci -q del_list "$d.ports=dheth0"
+done
+uci -q commit network
+
+# OpenClash TUN stack: unset, its yml generator fell back to an invalid
+# "mips" stack. system is the documented default.
+if uci -q get openclash.config >/dev/null && [ -z "$(uci -q get openclash.config.stack_type)" ]; then
+	uci set openclash.config.stack_type='system'
+	uci commit openclash
+fi
+# TurboACC: make the QCA ECM switch explicit on upgraded configs
+if uci -q get turboacc.config >/dev/null && [ -z "$(uci -q get turboacc.config.qca_ecm)" ]; then
+	uci set turboacc.config.qca_ecm='1'
+	uci commit turboacc
+fi
+exit 0

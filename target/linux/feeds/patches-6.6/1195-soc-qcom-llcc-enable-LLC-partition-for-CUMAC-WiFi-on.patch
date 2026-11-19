@@ -1,0 +1,49 @@
+From b41d80eba8260aa9c9847933479980b161e1284c Mon Sep 17 00:00:00 2001
+From: Manoharan Vijaya Raghavan <mraghava@qti.qualcomm.com>
+Date: Mon, 29 Jun 2026 13:06:13 +0530
+Subject: [PATCH] soc: qcom: llcc: enable LLC partition for CUMAC WiFi on
+ ipq9650
+
+Change-Id: I9a3527539665486461f06619c844834075b3e18f
+Signed-off-by: Manoharan Vijaya Raghavan <mraghava@qti.qualcomm.com>
+---
+ drivers/soc/qcom/llcc-qcom.c       | 9 +++++++--
+ include/linux/soc/qcom/llcc-qcom.h | 1 +
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/soc/qcom/llcc-qcom.c b/drivers/soc/qcom/llcc-qcom.c
+index de17188ad7a3..f8898839b38a 100644
+--- a/drivers/soc/qcom/llcc-qcom.c
++++ b/drivers/soc/qcom/llcc-qcom.c
+@@ -411,9 +411,14 @@ static const struct llcc_slice_config ipq5424_data[] =  {
+ };
+ 
+ static const struct llcc_slice_config ipq9650_data[] =  {
++	/* SCID 1 - RXFILL, TXDESC descriptors (PPE) */
++	{LLCC_RXFILL,     1,   128, 3, 0,  0x03FF, 0x0,  0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, },
+ 	/* SCID 2 - SKB, SKB data (APSS Core 0,1,2) */
+-	{LLCC_APSS,       2,   768, 1, 1,  0x0FFF, 0x0,  0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, },
+-	{LLCC_AI,         3,   128, 3, 1,  0x0FFF, 0x0,  0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, },
++	{LLCC_APSS,       2,   640, 1, 1,  0x03FF, 0x0,  0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, },
++	{LLCC_AI,         3,   128, 3, 1,  0x03FF, 0x0,  0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, },
++	/* SCID 5 - RXDESC & TXCMPL Descriptors (PPE) */
++	{LLCC_RXDESC,     5,   320, 3, 0,  0x03FF, 0x0,  0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, },
++	{LLCC_PCIE2G,     8,   384, 3, 0,  0xFC00, 0x0,  0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, },
+ };
+ 
+ static const struct llcc_edac_reg_offset llcc_v1_edac_reg_offset = {
+diff --git a/include/linux/soc/qcom/llcc-qcom.h b/include/linux/soc/qcom/llcc-qcom.h
+index e32ac19c85c4..6566423e14a9 100644
+--- a/include/linux/soc/qcom/llcc-qcom.h
++++ b/include/linux/soc/qcom/llcc-qcom.h
+@@ -61,6 +61,7 @@
+ #define LLCC_RXFILL 5
+ #define LLCC_PCIE5G 6
+ #define LLCC_PCIE6G 7
++#define LLCC_PCIE2G 8
+ 
+ 
+ /**
+-- 
+2.34.1
+

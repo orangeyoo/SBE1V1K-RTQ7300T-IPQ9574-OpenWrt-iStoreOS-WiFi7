@@ -1,0 +1,35 @@
+From: Orangeyoo <Orangeyoo@50848>
+Subject: iio: pressure: bmp280: pick the BMP3xx soft reset by chip_info
+
+0492 (BMP390 support) decides the BMP3xx soft reset by comparing chip id
+values. BMP580 (0x50) collides with BMP380 and BME280 (0x60) with BMP390,
+so a BMP580 got the BMP380 command sequence and failed probe with
+"device is not ready to accept commands" (-EBUSY) on the SBE1V1K sensor
+at 0x46.
+
+--- a/drivers/iio/pressure/bmp280-core.c	2026-11-15 20:55:56.358729298 +0800
++++ b/drivers/iio/pressure/bmp280-core.c	2026-11-15 20:55:56.395298032 +0800
+@@ -2509,13 +2509,20 @@
+ 		dev_warn(dev, "bad chip id: 0x%x is not a known chip id\n", chip_id);
+ 
+ 	for (i = 0; i < data->chip_info->num_chip_id; i++) {
+-		/* BMP3xx requires soft-reset as part of initialization */
+-		if (data->chip_info->chip_id[i] == BMP380_CHIP_ID) {
++		/*
++		 * BMP3xx requires soft-reset as part of initialization. Match on
++		 * the chip_info, not the id value: BMP580 shares id 0x50 with
++		 * BMP380 and BME280 shares 0x60 with BMP390, and the BMP380
++		 * command sequence leaves a BMP580 failing probe with -EBUSY.
++		 */
++		if (data->chip_info == &bmp380_chip_info &&
++		    data->chip_info->chip_id[i] == BMP380_CHIP_ID) {
+ 			ret = bmp380_cmd(data, BMP380_CMD_SOFT_RESET);
+ 			if (ret < 0)
+ 				return ret;
+ 		}
+-		else if (data->chip_info->chip_id[i] == BMP390_CHIP_ID) {
++		else if (data->chip_info == &bmp390_chip_info &&
++			 data->chip_info->chip_id[i] == BMP390_CHIP_ID) {
+ 			ret = regmap_read(regmap, BMP390_REG_ID, &chip_id);
+ 			if (ret < 0)
+ 				return ret;

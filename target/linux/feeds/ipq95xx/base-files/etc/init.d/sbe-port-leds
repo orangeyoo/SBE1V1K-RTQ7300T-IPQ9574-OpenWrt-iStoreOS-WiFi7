@@ -1,0 +1,51 @@
+#!/bin/sh /etc/rc.common
+# SBE1V1K: front-panel Ethernet port LEDs, OEM values.
+# Source: OEM /sbin/ETH_led_control.sh "recover" (run from OEM /etc/init.d/boot).
+# The PHYs drive the LEDs autonomously from these pattern words (link speed
+# on + tx/rx blink, duplex + 10 ms activity), no CPU involvement.
+# WAN (QCA8081 @0x1c) checked on the unit 2026-11-12 by the user: off with
+# no cable, lit/blinking with link and traffic.
+START=19
+
+phy_set() { ssdk_sh debug phy set "$1" "$2" "$3" >/dev/null 2>&1; }
+
+start() {
+	# Netdev-trigger sections written by images up to 1.0-rc2 would
+	# override the PHY pattern words below. 99-factory-led drops them on
+	# a fresh install, but uci-defaults do not run again on a sysupgrade
+	# that keeps the overlay, so clean up here on every boot.
+	if uci -q get system.led_wan_green >/dev/null ||
+	   uci -q get system.led_wan_yellow >/dev/null; then
+		uci -q delete system.led_wan_green
+		uci -q delete system.led_wan_yellow
+		uci -q commit system
+	fi
+	for led in /sys/class/leds/90000.mdio-1:1c:*; do
+		[ -w "$led/trigger" ] && echo none > "$led/trigger"
+	done
+
+	command -v ssdk_sh >/dev/null 2>&1 || return 0
+
+	# 2.5G WAN (QCA8081): LED0 = speed incl. 2.5G + tx/rx blink,
+	# LED2 = duplex + 10 ms activity. Kernel PHY LED triggers are left at
+	# "none" for these two (see 99-factory-led); polarity comes from the
+	# DTS (active-low).
+	phy_set 0x1c 0x40078079 0x0
+	phy_set 0x1c 0x40078075 0x0
+	phy_set 0x1c 0x40078078 0x8670
+	phy_set 0x1c 0x40078074 0x19f0
+
+	# 1G LAN (QCA8075 package members 0x12, 0x13): LED2 = speed + blink,
+	# LED1 = duplex + 10 ms activity
+	for phy in 0x12 0x13; do
+		phy_set $phy 0x40078074 0x8670
+		phy_set $phy 0x40078076 0x19f0
+	done
+
+	# 10G LAN (RTL8261N, MMD 0x1e vendor LED registers)
+	phy_set 0x0 0x401e0011 0xb
+	phy_set 0x0 0x401e0015 0xfe00
+	phy_set 0x0 0x401e0016 0x31f
+	phy_set 0x0 0x401e0017 0x1ff
+	phy_set 0x0 0x401e0018 0x2e0
+}

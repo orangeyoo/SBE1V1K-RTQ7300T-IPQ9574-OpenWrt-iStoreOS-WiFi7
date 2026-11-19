@@ -1,0 +1,112 @@
+#!/bin/sh
+# 8021x-client - control the wired IEEE 802.1X supplicant on a given interface.
+#
+# The supplicant is the wpad-macsec multicall binary dispatched through the
+# wpa_supplicant symlink so it gets wpa_supplicant_main(). The wired driver
+# ("-Dwired") plus the MACsec-enabled build provide 802.1X port authentication
+# on the WAN port.
+#
+# Usage:
+#   8021x-client start   <ifname> [config-file]
+#   8021x-client stop    <ifname>
+#   8021x-client status  <ifname>
+#   8021x-client restart <ifname> [config-file]
+
+WPAD_SUPPLICANT=/usr/sbin/wpa_supplicant-macsec
+ACTION_SCRIPT=/etc/802.1x/8021x_action.sh
+REFERENCE_CONF=/etc/802.1x/wpa-wired-reference.conf
+CTRL_IFACE_DIR=/var/run/wpa_supplicant
+
+usage() {
+	echo "Usage: $0 <start|stop|restart|status> <ifname> [config-file]" >&2
+	exit 1
+}
+
+[ -x "$WPAD_SUPPLICANT" ] || {
+	echo "8021x-client: $WPAD_SUPPLICANT not found" >&2
+	exit 1
+}
+
+CMD="$1"
+IFNAME="$2"
+CONF="$3"
+[ -n "$IFNAME" ] || usage
+
+RUN_CONF="/var/run/8021x-${IFNAME}.conf"
+PID_FILE="/var/run/8021x-${IFNAME}.pid"
+
+supplicant_running() {
+	[ -f "$PID_FILE" ] || return 1
+	local pid
+	pid="$(cat "$PID_FILE" 2>/dev/null)"
+	[ -n "$pid" ] && [ -d "/proc/$pid" ]
+}
+
+prepare_config() {
+	# Seed the runtime config: prefer a caller supplied config, otherwise fall
+	# back to the packaged reference file. The interface is always appended so
+	# the same reference file works for any port.
+	[ -n "$CONF" ] && [ -r "$CONF" ] || CONF="$REFERENCE_CONF"
+	[ -r "$CONF" ] || {
+		echo "8021x-client: no readable config ($CONF missing)" >&2
+		return 1
+	}
+	{
+		cat "$CONF"
+		echo "ctrl_interface=$CTRL_IFACE_DIR"
+		echo "action_session_id=1"
+	} > "$RUN_CONF"
+	return 0
+}
+
+do_start() {
+	if supplicant_running; then
+		echo "8021x-client: supplicant already running on $IFNAME"
+		return 0
+	fi
+	prepare_config || return 1
+	mkdir -p "$CTRL_IFACE_DIR"
+	# -W waits for a control socket connection before authenticating; the
+	# action script receives auth state transitions for DHCP management.
+	"$WPAD_SUPPLICANT" -Dwired -i "$IFNAME" -c "$RUN_CONF" \
+		-P "$PID_FILE" -B -W -p "$CTRL_IFACE_DIR" \
+		-o "$ACTION_SCRIPT"
+	return $?
+}
+
+do_stop() {
+	if supplicant_running; then
+		kill "$(cat "$PID_FILE")" 2>/dev/null
+		sleep 1
+	fi
+	if supplicant_running; then
+		kill -9 "$(cat "$PID_FILE")" 2>/dev/null
+	fi
+	rm -f "$PID_FILE" "$RUN_CONF" "$CTRL_IFACE_DIR/$IFNAME"
+	return 0
+}
+
+case "$CMD" in
+	start)
+		do_start
+		;;
+	stop)
+		do_stop
+		;;
+	restart)
+		do_stop
+		do_start
+		;;
+	status)
+		if supplicant_running; then
+			echo "running (pid $(cat "$PID_FILE"))"
+			exit 0
+		else
+			echo "stopped"
+			exit 1
+		fi
+		;;
+	*)
+		usage
+		;;
+esac

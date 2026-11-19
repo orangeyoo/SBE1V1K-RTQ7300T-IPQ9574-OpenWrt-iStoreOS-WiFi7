@@ -1,0 +1,50 @@
+From dd8f52e793a7a140ad2df3a577d6cb315d4a39c6 Mon Sep 17 00:00:00 2001
+From: Poovendhan Selvaraj <poovendh@qti.qualcomm.com>
+Date: Sat, 16 May 2026 15:25:37 +0530
+Subject: [PATCH] crypto: qce: fix CCM AAD buffer underallocation causing wrong
+ auth tag
+
+The formatted AAD buffer allocated in qce_aead_ccm_prepare_buf_assoclen()
+is too small. The allocation uses:
+
+  ALIGN(assoclen, 16) + MAX_CCM_ADATA_HEADER_LEN
+
+but the scatter-gather entry for this buffer is set up with length:
+
+  rctx->assoclen = ALIGN(assoclen + adata_header_len, 16)
+
+For assoclen=32 and adata_header_len=2, the allocation is 38 bytes while
+the DMA transfer length is 48 bytes. The hardware reads 48 bytes from a
+38-byte buffer via DMA for CBC-MAC computation, causing the authentication
+tag to be computed over 10 bytes of uninitialized memory beyond the
+allocation.
+
+Fix this by using the correct formula:
+
+  ALIGN(assoclen + MAX_CCM_ADATA_HEADER_LEN, 16)
+
+which guarantees the buffer is always large enough for the full padded AAD
+including the length encoding header.
+
+Change-Id: I75ff191cdef45d9e2c324fb2dcb883bf10a0a413
+Signed-off-by: Poovendhan Selvaraj <poovendh@qti.qualcomm.com>
+---
+ drivers/crypto/qce/aead.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/crypto/qce/aead.c b/drivers/crypto/qce/aead.c
+index ca47859acab9..3d0700f3c2c8 100644
+--- a/drivers/crypto/qce/aead.c
++++ b/drivers/crypto/qce/aead.c
+@@ -218,7 +218,7 @@ qce_aead_ccm_prepare_buf_assoclen(struct aead_request *req)
+ 	/* Get the msg */
+ 	msg_sg = scatterwalk_ffwd(__sg, req->src, req->assoclen);
+ 
+-	rctx->adata = kzalloc((ALIGN(assoclen, 16) + MAX_CCM_ADATA_HEADER_LEN) *
++	rctx->adata = kzalloc(ALIGN(assoclen + MAX_CCM_ADATA_HEADER_LEN, 16) *
+ 			       sizeof(unsigned char), GFP_ATOMIC);
+ 	if (!rctx->adata)
+ 		return -ENOMEM;
+-- 
+2.34.1
+

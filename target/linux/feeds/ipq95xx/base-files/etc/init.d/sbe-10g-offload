@@ -1,0 +1,61 @@
+#!/bin/sh /etc/rc.common
+# Wiro SBE1V1K: endpoint offload feature defaults (ported verbatim from
+# Orangeyoo 1.0 /etc/init.d/sbe-10g-offload).
+# Only enable features explicitly supported by the running driver.
+# All four ports: the 1.0 original listed eth0/eth3 only, so the 2.5G WAN
+# (eth1) and the second 1G port (eth2) ran without GSO.
+START=15
+USE_PROCD=1
+EXTRA_COMMANDS="recheck"
+EXTRA_HELP="	recheck	Re-enable GSO on LAN ports where boot turned it off"
+
+apply() {
+    for dev in eth0 eth1 eth2 eth3; do
+        [ -e "/sys/class/net/$dev" ] || continue
+        command -v ethtool >/dev/null 2>&1 || continue
+        ethtool -K "$dev" gro on gso on tso on 2>/dev/null || true
+    done
+}
+
+# LAN GSO may need a late re-check. Run it as a one-shot procd instance.
+# Leave the WAN as-is: ethtool -K can reset the live nss-dp link.
+recheck() {
+    local delay dev wan_logged=0
+    for delay in 60 60 60 120; do
+        sleep $delay
+        for dev in eth0 eth1 eth2 eth3; do
+            [ -e "/sys/class/net/$dev" ] || continue
+            [ "$dev" != eth1 ] || [ "$wan_logged" = 0 ] || continue
+            ethtool -k "$dev" 2>/dev/null | grep -q '^generic-segmentation-offload: off' || continue
+            if [ "$dev" = eth1 ]; then
+                logger -t sbe-offload "eth1 (WAN): GSO off, not re-enabling at runtime (ethtool -K can reset nss-dp link)"
+                wan_logged=1
+                continue
+            fi
+            logger -t sbe-offload "$dev: GSO was off, re-enabling"
+            ethtool -K "$dev" gso on 2>/dev/null || true
+        done
+    done
+}
+
+# turboacc shipped bbr_cca=1 up to 1.0-rc4 and its init script forces
+# tcp_congestion_control from it, overriding 13-sbe-tcp-cubic.conf. BBR
+# cut router-terminated Wi-Fi TCP to about a third (see sysctl file).
+# Switch the old default off once; a later user choice is kept.
+cca_migrate() {
+    [ -e /etc/sbe-tcp-cubic-v1 ] && return 0
+    if [ "$(uci -q get turboacc.config.bbr_cca)" = 1 ]; then
+        uci set turboacc.config.bbr_cca=0
+        uci commit turboacc
+        logger -t sbe-offload "turboacc bbr_cca 1 -> 0 (CUBIC default)"
+    fi
+    touch /etc/sbe-tcp-cubic-v1
+}
+
+start_service() {
+    cca_migrate
+    apply
+    procd_open_instance gso-recheck
+    procd_set_param command /etc/init.d/sbe-10g-offload recheck
+    procd_close_instance
+}

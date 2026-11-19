@@ -1,0 +1,86 @@
+#!/bin/sh
+# SBE1V1K: Wi-Fi firmware recovery supervisor (run by /etc/init.d/sbe-wifi-watchdog).
+#
+# 802.11s mesh: when the 6G firmware restarts, mac80211 restores the mesh
+# point in place and the WBE.1.1.r7 firmware asserts again on that mesh
+# vdev start (reproduced 2026-11-14: AP-only recovers in ~30 s; with the
+# mesh, RDDM 200 ms after "vdev 1 start", nested reset, BUG_ON reboot).
+# A mesh point re-joined through wpa_supplicant afterwards is fine. So as
+# soon as a chip enters recovery, remove its mesh interfaces (before the
+# driver restarts the firmware) and bring the radio up again once the
+# recovery has finished.
+#
+# Stuck recovery: if any chip still reports recovery in progress after
+# 5 minutes, keep the kernel log and reboot (2026-11-13: a recovery hung
+# on a driver mutex and all Wi-Fi stayed down until a power cycle).
+
+chip_phy() {
+	local p
+	for p in /sys/class/ieee80211/*; do
+		case "$(readlink -f "$p/device")" in
+		*/"$1") echo "${p##*/}"; return ;;
+		esac
+	done
+}
+
+# uci radios on this chip that carry an enabled mesh interface
+mesh_radios() {
+	local s dev
+	for s in $(uci -q show wireless | sed -n "s/^wireless\.\([^.]*\)\.mode='mesh'$/\1/p"); do
+		[ "$(uci -q get wireless.$s.disabled)" = 1 ] && continue
+		dev=$(uci -q get wireless.$s.device)
+		case "$(uci -q get wireless.$dev.path)" in
+		*/"$1") echo "$dev" ;;
+		esac
+	done | sort -u
+}
+
+drop_mesh() {
+	local phy=$1 d i
+	for d in /sys/class/net/*; do
+		i=${d##*/}
+		[ "$(readlink -f "$d/phy80211" 2>/dev/null)" = "$(readlink -f /sys/class/ieee80211/$phy)" ] || continue
+		iw dev "$i" info 2>/dev/null | grep -q 'type mesh point' || continue
+		iw dev "$i" del && logger -t sbe-wifi-watchdog "$phy recovering: removed mesh interface $i"
+	done
+}
+
+stuck=0
+while sleep 1; do
+	busy=0
+	for f in /sys/kernel/debug/ath12k/*/recovery_in_progress; do
+		[ -r "$f" ] || continue
+		dir=${f%/recovery_in_progress}; pci=${dir##*/pci-}
+		key=$(echo "$pci" | tr -c '0-9a-zA-Z\n' _)
+		eval "was=\${rec_$key:-0} pending=\${mesh_$key}"
+		if [ "$(cat "$f" 2>/dev/null)" = 1 ]; then
+			busy=1
+			if [ "$was" = 0 ]; then
+				radios=$(mesh_radios "$pci")
+				phy=$(chip_phy "$pci")
+				[ -n "$radios" ] && [ -n "$phy" ] && drop_mesh "$phy"
+				eval "rec_$key=1 mesh_$key=\"\$radios\""
+			fi
+		elif [ "$was" = 1 ]; then
+			eval "rec_$key=0 mesh_$key="
+			if [ -n "$pending" ]; then
+				sleep 5
+				for r in $pending; do
+					/sbin/wifi up "$r" >/dev/null 2>&1
+					logger -t sbe-wifi-watchdog "recovery done: re-joined mesh on $r"
+				done
+			fi
+		fi
+	done
+	if [ "$busy" = 1 ]; then
+		stuck=$((stuck + 1))
+	else
+		stuck=0
+	fi
+	[ "$stuck" -ge 300 ] || continue
+	logger -t sbe-wifi-watchdog "Wi-Fi firmware recovery stuck for ${stuck}s, rebooting"
+	dmesg | tail -n 400 > /etc/sbe-wifi-recovery-last.log 2>/dev/null
+	sync
+	reboot
+	exit 0
+done

@@ -1,0 +1,27 @@
+From e5d1a01cbc7c42d4c818535346568cba1b8d99d3 Mon Sep 17 00:00:00 2001
+From: Sridharan S N <quic_sridsn@quicinc.com>
+Date: Wed, 5 Feb 2025 10:02:43 +0530
+Subject: [PATCH] usb: misc: qcom_eud: Update the chip enabled as false when
+ EUD is disabled.
+
+Update the chip->enabled bool as false when it is disabled.
+So the sysfs will reflect the eud state properly.
+
+Change-Id: I91a4b9ec7060e6d2b81402d4a603ff16175445f5
+Signed-off-by: Sridharan S N <quic_sridsn@quicinc.com>
+---
+ drivers/usb/misc/qcom_eud.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+Index: linux-6.6.116/drivers/usb/misc/qcom_eud.c
+===================================================================
+--- linux-6.6.116.orig/drivers/usb/misc/qcom_eud.c	2026-01-27 00:45:06.738577956 +0530
++++ linux-6.6.116/drivers/usb/misc/qcom_eud.c	2026-01-27 00:47:22.449582945 +0530
+@@ -105,6 +105,7 @@
+ 
+ 	} else {
+ 		ret = disable_eud(chip);
++		chip->enabled = enable;
+ 	}
+ 
+ 	return ret < 0 ? ret : count;

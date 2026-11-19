@@ -1,0 +1,44 @@
+#!/bin/sh /etc/rc.common
+# SBE1V1K: keep the factory OWE-transition companions consistent with what
+# the user configures. 2.4G/5G ship open + a hidden "<ssid>_OWE" BSS (Wi-Fi 7
+# needs encryption). Once the user sets a password (or any encryption) on the
+# visible network, or renames it, the companion is dropped or renamed so no
+# stale open/OWE network is left behind.
+START=98
+USE_PROCD=1
+
+sync_companions() {
+	local b o w enc ssid changed=
+	for b in 0 1; do
+		o=default_radio0_band$b
+		w=owe_radio0_band$b
+		uci -q get wireless.$w >/dev/null || continue
+		enc=$(uci -q get wireless.$o.encryption)
+		ssid=$(uci -q get wireless.$o.ssid)
+		if [ "$enc" != none ] || [ -z "$ssid" ] ||
+		   [ "$(uci -q get wireless.$o.disabled)" = 1 ]; then
+			uci -q delete wireless.$w
+			uci -q delete wireless.$o.owe_transition_ifname
+			changed=1
+		elif [ "$(uci -q get wireless.$w.ssid)" != "${ssid}_OWE" ]; then
+			uci set wireless.$w.ssid="${ssid}_OWE"
+			changed=1
+		fi
+	done
+	[ -n "$changed" ] || return 0
+	uci commit wireless
+	logger -t sbe-wifi-guard "OWE companions updated after a wireless change"
+	/sbin/wifi reload >/dev/null 2>&1 &
+}
+
+start_service() {
+	sync_companions
+}
+
+reload_service() {
+	sync_companions
+}
+
+service_triggers() {
+	procd_add_reload_trigger wireless
+}

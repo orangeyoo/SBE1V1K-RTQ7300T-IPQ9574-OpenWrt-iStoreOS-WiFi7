@@ -1,0 +1,50 @@
+From 6178af545742c17f70b421c85cf4e7b643b5c647 Mon Sep 17 00:00:00 2001
+From: Vignesh Viswanathan <viswanat@qti.qualcomm.com>
+Date: Fri, 8 May 2026 17:16:33 +0530
+Subject: [PATCH] bus: mhi: host: Fix integer underflow in firmware size check
+
+When core only firmware is used (<512KB), the ELF-based optimization
+code attempts to calculate RW segment size before validating that the
+firmware is large enough to contain even one full segment. This leads
+to an integer underflow:
+
+  rw_size = fw_sz - (num_ro_segments * seg_len)
+          = 479296 - 524288
+          = -44992 (underflows to 18446744073709506624)
+
+The underflowed value causes a kernel panic during memcpy when trying
+to copy an impossibly large amount of data.
+
+Add an early size check before any ELF analysis. If firmware size is
+smaller than one segment, skip the optimization entirely and fall back
+to normal full allocation. This avoids the underflow and eliminates
+unnecessary ELF parsing overhead for small firmware that cannot benefit
+from the optimization anyway.
+
+Change-Id: If99933a108f70fd96509bd258014458091ad601d
+Signed-off-by: Vignesh Viswanathan <viswanat@qti.qualcomm.com>
+---
+ drivers/bus/mhi/host/boot.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/bus/mhi/host/boot.c b/drivers/bus/mhi/host/boot.c
+index 4a37e3de96a2..8cf2ac99574a 100644
+--- a/drivers/bus/mhi/host/boot.c
++++ b/drivers/bus/mhi/host/boot.c
+@@ -962,6 +962,13 @@ void mhi_fw_load_handler(struct mhi_controller *mhi_cntrl)
+ 			const u8 *elf2_data;
+ 			size_t elf2_offset, elf1_size, fw_size;
+ 
++			/* Skip optimization if firmware is smaller than one segment */
++			if (fw_sz < mhi_cntrl->seg_len) {
++				dev_info(dev, "Firmware size (%zu) < segment size (%zu), skipping optimization\n",
++					 fw_sz, mhi_cntrl->seg_len);
++				goto skip_optimization;
++			}
++
+ 			/* Determine scenario and find second ELF */
+ 			if (fw_data != original_fw_data) {
+ 				/* Dual ELF detected at sbl_size */
+-- 
+2.34.1
+
