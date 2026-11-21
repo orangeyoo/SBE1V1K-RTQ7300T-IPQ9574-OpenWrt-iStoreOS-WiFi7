@@ -1,0 +1,15 @@
+#!/bin/sh /etc/rc.common
+# SBE1V1K: keep a Wi-Fi firmware crash from stalling its own recovery.
+# ath12k hands the crash dump to devcoredump and waits for it to be freed
+# while holding ag->mutex. With no reader devcoredump frees it only after
+# 5 minutes, so the partner radios' halt queued behind the mutex and the
+# recovery never finished (2026-11-14 crash logs: ath12k_core_halt blocked,
+# node rebooted via sbe-wifi-watchdog). Nobody reads these dumps on the
+# product, so drop them at once; the crash is still in dmesg.
+START=12
+
+start() {
+	[ -w /sys/class/devcoredump/disabled ] || exit 0
+	echo 1 > /sys/class/devcoredump/disabled
+	logger -t sbe-wifi-coredump "devcoredump disabled (Wi-Fi recovery must not wait for a dump reader)"
+}

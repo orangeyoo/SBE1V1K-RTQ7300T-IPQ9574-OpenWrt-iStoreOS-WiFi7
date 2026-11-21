@@ -1,0 +1,17 @@
+src-link qca_nss        ../qca/feeds/nss
+src-link qca_packages   ../qca/feeds/packages
+src-link qca_routing    ../qca/feeds/routing
+src-link qca_bootloader ../qca/feeds/bootloader
+src-link qca_wlan_open  ../qca/feeds/wlan-open
+src-link qca_wlan_utils ../qca/feeds/wlan_utils
+src-link qca_hostapd    ../qca/feeds/wlan-hostapd
+src-link qca_controlapp ../qca/feeds/control-app-open
+src-link qca_lte_data   ../qca/feeds/lte-data-oss
+src-link qca_optic_apps ../qca/feeds/optic-apps-oss
+src-link qca_optic_drv  ../qca/feeds/optic-drivers-oss
+src-link qca_debug_uio  ../qca/feeds/qca-debug-uio
+src-link qca_rptr_mgr   ../qca/feeds/qca-rptr-mgr
+src-link qca_rsrcmgr    ../qca/feeds/qca-rsrcmgr
+src-link qca_plat_utils ../qca/feeds/platform_utils
+src-link qca_sigma_dut  ../qca/feeds/sigma-dut-open
+src-link qca_owrt_tools ../qca/feeds/openwrt-tools

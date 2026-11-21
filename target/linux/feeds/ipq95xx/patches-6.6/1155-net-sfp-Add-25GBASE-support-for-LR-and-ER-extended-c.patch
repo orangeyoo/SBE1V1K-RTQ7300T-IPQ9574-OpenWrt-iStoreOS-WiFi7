@@ -1,0 +1,52 @@
+From b349c5a88373ef77f658650cf7ebfa0be0fd01f7 Mon Sep 17 00:00:00 2001
+From: zhongjia <zhongjia@qti.qualcomm.com>
+Date: Wed, 15 Apr 2026 00:22:57 +0800
+Subject: [PATCH] net: sfp: Add 25GBASE support for LR and ER extended
+ compliance codes
+
+The current implementation of sfp_parse_support() handles the
+SFF8024_ECC_100GBASE_LR4_25GBASE_LR (0x03) and
+SFF8024_ECC_100GBASE_ER4_25GBASE_ER (0x04) extended compliance codes
+but only configures 100GBASE-LR4/ER4 modes. It fails to configure the
+25GBASE-LR and 25GBASE-ER modes that are also part of these compliance
+codes, causing 25G LR/ER SFP28 modules to not properly advertise their
+capabilities.
+
+According to SFF-8024 specification, these extended compliance codes
+cover both 100G and 25G modes:
+- 0x03: 100GBASE-LR4/ER4 and 25GBASE-LR (Long Reach)
+- 0x04: 100GBASE-ER4 and 25GBASE-ER (Extended Reach)
+
+The missing 25GBASE support causes link negotiation failures when using
+25G LR/ER SFP28 modules, as phylink cannot properly configure the
+interface mode and link capabilities.
+
+This patch adds for both cases:
+1. phylink_set(modes, 25000baseSR_Full) - to advertise 25G capability
+   (using SR mode as a generic 25G link mode since there's no specific
+   25000baseLR_Full or 25000baseER_Full in the kernel)
+2. __set_bit(PHY_INTERFACE_MODE_25GBASER, interfaces) - to enable
+   25GBASE-R interface mode
+
+Change-Id: Id90b8752e9cc7364a69f6878b01343109cd52ddb
+Signed-off-by: Zhongjian Liu <zhongjia@qti.qualcomm.com>
+---
+ drivers/net/phy/sfp-bus.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/net/phy/sfp-bus.c b/drivers/net/phy/sfp-bus.c
+index 274bb090b827..4b972bc2404c 100644
+--- a/drivers/net/phy/sfp-bus.c
++++ b/drivers/net/phy/sfp-bus.c
+@@ -272,6 +272,8 @@ void sfp_parse_support(struct sfp_bus *bus, const struct sfp_eeprom_id *id,
+ 	case SFF8024_ECC_100GBASE_LR4_25GBASE_LR:
+ 	case SFF8024_ECC_100GBASE_ER4_25GBASE_ER:
+ 		phylink_set(modes, 100000baseLR4_ER4_Full);
++		phylink_set(modes, 25000baseSR_Full);
++		__set_bit(PHY_INTERFACE_MODE_25GBASER, interfaces);
+ 		break;
+ 	case SFF8024_ECC_100GBASE_CR4:
+ 		phylink_set(modes, 100000baseCR4_Full);
+-- 
+2.34.1
+

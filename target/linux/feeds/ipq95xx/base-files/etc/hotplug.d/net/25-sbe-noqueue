@@ -1,0 +1,14 @@
+#!/bin/sh
+# SBE1V1K: no Linux qdisc on the PPE ports and PPPoE device.
+# ECM's PPE frontend refuses any flow whose egress netdev has a qdisc other
+# than noqueue (ppe_fail_reason "TO_IFACE_QDISC_UNSUPPORTED"); with the
+# kernel default fq_codel on eth0-3 every routed flow fell back to SFE
+# (software). The PPE queues in hardware, so noqueue is the intended setup.
+# Checked on the unit 2026-11-13: PPE accelerated count 0 -> >0.
+[ "$ACTION" = add ] || exit 0
+case "$DEVICENAME" in
+	eth[0-9]|pppoe-*) ;;
+	*) exit 0 ;;
+esac
+tc qdisc replace dev "$DEVICENAME" root noqueue 2>/dev/null
+exit 0

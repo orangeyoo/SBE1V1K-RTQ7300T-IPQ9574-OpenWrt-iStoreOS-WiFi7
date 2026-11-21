@@ -1,0 +1,14 @@
+#!/bin/sh
+# Wiro SBE1V1K: STP always-on for br-lan (ported from Orangeyoo 1.0).
+# A Layer2 loop is auto-blocked by STP instead of flooding broadcast
+# storms into the PPE hardware forwarding tables (a loop once took down
+# the whole LAN incl. the 10G port on 1.x).  2.0 note: netifd keeps the
+# bridge in an anonymous `config device` section whose name is 'br-lan',
+# so locate that section instead of 1.x's named 'device_lan'.
+for _i in 0 1 2 3 4 5 6 7 8 9 10 11; do
+	[ "$(uci -q get network.@device[$_i].name)" = "br-lan" ] || continue
+	uci set network.@device[$_i].stp='1'
+	logger -t o2-hardening "STP enabled on br-lan (device @device[$_i])"
+	break
+done
+uci commit network

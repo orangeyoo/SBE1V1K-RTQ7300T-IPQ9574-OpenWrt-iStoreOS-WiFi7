@@ -1,0 +1,56 @@
+From e0a6b39a59d1b68b556068b5c181b04e1ed64a17 Mon Sep 17 00:00:00 2001
+From: Manikanta Mylavarapu <mmanikan@qti.qualcomm.com>
+Date: Tue, 26 May 2026 08:50:46 +0530
+Subject: [PATCH] PCI: save and restore Root Port config space during slot
+ reset
+
+When a PCIe slot reset is performed via the host bridge's reset_slot()
+callback, the Root Port's config space can be lost during the reset
+operation. This includes critical configuration such as BARs, interrupt
+line assignments, and capability registers. Currently, only the endpoint
+device's state is saved by the caller before reset, while the Root
+Port's state is not preserved, leading to configuration loss after link
+recovery. This manifests as missing legacy interrupt assignments
+(PCI_INTERRUPT_LINE = 0xFF) and cleared BAR addresses after the reset
+completes.
+
+Save the Root Port's config space before invoking the host bridge's
+reset_slot() callback, and restore it on success. This ensures the Root
+Port maintains its configuration across slot reset operations, similar
+to how endpoint device state is preserved by the caller. This is
+particularly important for systems where legacy INTx interrupts are used
+alongside MSI/MSI-X, Root Port BARs are configured for memory-mapped
+registers, or link recovery needs to maintain pre-reset configuration.
+
+Change-Id: I99ccf0cc4943a71ee15c79e5f74ff80f42ecc546
+Signed-off-by: Manikanta Mylavarapu <mmanikan@qti.qualcomm.com>
+---
+ drivers/pci/pci.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/pci/pci.c b/drivers/pci/pci.c
+index 9f248465acf6..73ef9aa90904 100644
+--- a/drivers/pci/pci.c
++++ b/drivers/pci/pci.c
+@@ -5257,9 +5257,18 @@ void __weak pcibios_reset_secondary_bus(struct pci_dev *dev)
+ 	int ret;
+ 
+ 	if (host->reset_slot) {
++		/*
++		 * Save the config space of the Root Port before doing the
++		 * reset, since the state could be lost. The Endpoint state
++		 * should've been saved by the caller.
++		 */
++		pci_save_state(dev);
+ 		ret = host->reset_slot(host, dev);
+ 		if (ret)
+ 			pci_err(dev, "failed to reset slot: %d\n", ret);
++		else
++			/* Now restore it on success */
++			pci_restore_state(dev);
+ 		return;
+ 	}
+ 
+-- 
+2.34.1
+

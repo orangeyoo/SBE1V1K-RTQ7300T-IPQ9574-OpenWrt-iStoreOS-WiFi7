@@ -1,0 +1,33 @@
+#!/bin/sh
+# SBE1V1K initramfs /init (b6): keep the RAM rootfs authoritative.
+#
+# Why this file exists: the built-in initramfs cpio (root-ipq95xx, ~105MiB
+# unpacked) shipped WITHOUT /init, so kernel_init_freeable() saw no /init,
+# called prepare_namespace(), mounted root=/dev/mmcblk0p27 (the U-Boot env
+# bootargs' flash root) and the whole RAM boot silently became the flash
+# 1.0 system (istore-native-m overlay stack, cnss[38] prints) - our FIT
+# rootfs never ran.  With /init present the kernel stays on the tmpfs.
+#
+# PREINIT=1 lets /etc/preinit run its hook set (it execs /sbin/init
+# immediately otherwise); INITRAMFS=1 keeps lib/preinit/80_mount_root
+# from mounting/switching to the flash root (its own gate:
+# [ "$INITRAMFS" = "1" ] || boot_hook_add preinit_main do_mount_root).
+#
+# After preinit, exec procd (PID1) on the RAM rootfs; sysinit loads our
+# /etc/modules.d set (ath12k_wifi7 fork + friends) with our firmware
+# packages from /lib/firmware/ath12k/ - the first boot in which our FIT
+# rootfs actually participates.
+
+export PATH="/usr/sbin:/usr/bin:/sbin:/bin"
+export PREINIT=1
+export INITRAMFS=1
+
+[ -d /proc/self ] || mount -t proc proc /proc
+[ -d /sys/kernel ] || mount -t sysfs sysfs /sys
+[ -d /dev/bus ] || mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+mkdir -p /dev/pts
+[ -e /dev/pts/ptmx ] || mount -t devpts devpts /dev/pts 2>/dev/null || true
+
+. /etc/preinit
+
+exec /sbin/init

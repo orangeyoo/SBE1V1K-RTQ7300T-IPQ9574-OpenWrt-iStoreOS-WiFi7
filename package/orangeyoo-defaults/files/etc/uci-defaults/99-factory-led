@@ -1,0 +1,9 @@
+#!/bin/sh
+# Orangeyoo: WAN jack (QCA8081 @ mdio 0x1c) PHY LEDs are driven by the PHY
+# itself with the OEM pattern words (/etc/init.d/sbe-port-leds). Keep the
+# kernel LED triggers off so they do not overwrite those registers, and
+# drop the netdev-trigger sections written by images up to 1.0-rc2.
+uci -q delete system.led_wan_green
+uci -q delete system.led_wan_yellow
+uci -q commit system
+exit 0

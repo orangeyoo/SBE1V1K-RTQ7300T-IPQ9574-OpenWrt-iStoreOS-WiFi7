@@ -1,0 +1,44 @@
+From 4f2c3ed73745b6002d23913ed7ffaadafbb01c5c Mon Sep 17 00:00:00 2001
+From: Sridharan S N <sridsn@qti.qualcomm.com>
+Date: Mon, 25 May 2026 12:19:36 +0530
+Subject: [PATCH] pci: controller: Add force_single_lane support for IPQ9650
+
+Add force_single_lane support for IPQ9650 in qcom_ipq_switch_lane.
+
+While at it, Replace hardcoded pcie->domain == 2/3 check
+with dynamic pci->num_lanes == 2 check. The num_lanes field is populated
+from the 'num-lanes' DT property by the DWC core, making the check
+platform-agnostic across all dual-lane PCIe instances.
+
+Change-Id: If5fe9b4443872b355c74d0d7da84b4a3e1d661e1
+Signed-off-by: Sridharan S N <sridsn@qti.qualcomm.com>
+---
+ drivers/pci/controller/dwc/pcie-qcom.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/pci/controller/dwc/pcie-qcom.c b/drivers/pci/controller/dwc/pcie-qcom.c
+index e9cabd17fca0..e92ea7c79a2b 100644
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -2632,8 +2632,8 @@ static void qcom_ipq_switch_lane(struct pci_dev *dev)
+ 	devp = pci->dev;
+ 	np = devp->of_node;
+ 
+-	/* Switching PCIE Nodes 2/3 to single lane if force_to_single_lane property is defined in dts */
+-	if ((of_property_read_bool(np, "force_to_single_lane")) && (pcie->domain == 2 || pcie->domain == 3)) {
++	/* Switching dual lane PCIE instances to single lane if force_to_single_lane property is defined in dts */
++	if ((of_property_read_bool(np, "force_to_single_lane")) && (pci->num_lanes == 2)) {
+ 
+ 		dev_info(devp,"Forcing PCIE to single lane\n");
+ 
+@@ -2685,6 +2685,7 @@ DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_QCOM, 0x1001, qcom_fixup_class);
+ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_QCOM, 0x1109, qcom_ipq_tc_vc_mapping);
+ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_QCOM, 0x1108, qcom_ipq_switch_lane);
+ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_QCOM, 0x1006, qcom_ipq_switch_lane);
++DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_QCOM, 0x1007, qcom_ipq_switch_lane);
+ 
+ static const struct dev_pm_ops qcom_pcie_pm_ops = {
+ 	NOIRQ_SYSTEM_SLEEP_PM_OPS(qcom_pcie_suspend_noirq, qcom_pcie_resume_noirq)
+-- 
+2.34.1
+

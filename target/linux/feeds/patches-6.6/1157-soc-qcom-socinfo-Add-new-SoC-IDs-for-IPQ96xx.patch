@@ -1,0 +1,47 @@
+From c5d853a7b22ea08636b596a33e95800a784d406e Mon Sep 17 00:00:00 2001
+From: Sridharan S N <sridsn@qti.qualcomm.com>
+Date: Mon, 20 Apr 2026 15:41:24 +0530
+Subject: [PATCH] soc: qcom: socinfo: Add new SoC IDs for IPQ96xx
+
+Add SoC IDs for IPQ9670, IPQ9640, IPQ9630 and IPQ9610
+
+Change-Id: I2769d4f7672bae5920fe7776244c3800f15b0854
+Signed-off-by: Sridharan S N <sridsn@qti.qualcomm.com>
+---
+ drivers/soc/qcom/socinfo.c         | 4 ++++
+ include/dt-bindings/arm/qcom,ids.h | 4 ++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/drivers/soc/qcom/socinfo.c b/drivers/soc/qcom/socinfo.c
+index d12d59142594..2d8361422828 100644
+--- a/drivers/soc/qcom/socinfo.c
++++ b/drivers/soc/qcom/socinfo.c
+@@ -426,6 +426,10 @@ static const struct soc_id soc_id[] = {
+ 	{ qcom_board_id(QCF3210) },
+ 	{ qcom_board_id(IPQ9620) },
+ 	{ qcom_board_id(IPQ9650) },
++	{ qcom_board_id(IPQ9670) },
++	{ qcom_board_id(IPQ9640) },
++	{ qcom_board_id(IPQ9630) },
++	{ qcom_board_id(IPQ9610) },
+ };
+ 
+ static const char *socinfo_machine(struct device *dev, unsigned int id)
+diff --git a/include/dt-bindings/arm/qcom,ids.h b/include/dt-bindings/arm/qcom,ids.h
+index 103610f96b4d..6926e428cb28 100644
+--- a/include/dt-bindings/arm/qcom,ids.h
++++ b/include/dt-bindings/arm/qcom,ids.h
+@@ -270,6 +270,10 @@
+ #define QCOM_ID_QCF3210			769
+ #define QCOM_ID_IPQ9620			770
+ #define QCOM_ID_IPQ9650			771
++#define QCOM_ID_IPQ9670			781
++#define QCOM_ID_IPQ9640			780
++#define QCOM_ID_IPQ9630			779
++#define QCOM_ID_IPQ9610			778
+ 
+ /*
+  * The board type and revision information, used by Qualcomm bootloaders and
+-- 
+2.34.1
+

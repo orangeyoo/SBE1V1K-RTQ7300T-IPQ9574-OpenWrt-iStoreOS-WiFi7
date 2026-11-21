@@ -1,0 +1,44 @@
+From ff2230aa4cd1251ad54edeaca826fa2229a9eaca Mon Sep 17 00:00:00 2001
+From: arungane <arungane@qti.qualcomm.com>
+Date: Wed, 24 Jun 2026 17:08:13 +0530
+Subject: [PATCH] updated Kconfig and Makefile for smmu pmu driver ref:6864742
+
+Change-Id: Ib7560cd5298ac6e070bf2476521dca424e30fe15
+Signed-off-by: arungane <arungane@qti.qualcomm.com>
+---
+ drivers/perf/Kconfig  | 9 +++++++++
+ drivers/perf/Makefile | 1 +
+ 2 files changed, 10 insertions(+)
+
+diff --git a/drivers/perf/Kconfig b/drivers/perf/Kconfig
+index 273d67ecf6d2..004d76ae1965 100644
+--- a/drivers/perf/Kconfig
++++ b/drivers/perf/Kconfig
+@@ -165,6 +165,15 @@ config THUNDERX2_PMU
+ 	   The SoC has PMU support in its L3 cache controller (L3C) and
+ 	   in the DDR4 Memory Controller (DMC).
+ 
++config ARM_SMMU_PMU
++	 tristate "ARM SMMU PMU"
++	 depends on PERF_EVENTS && ARM64 && ARM_SMMU
++	   help
++	   Provides support for the SMMU performance monitor unit (PMU)
++	   on ARM-based systems.
++	   Adds the SMMU PMU into the perf events subsystem for
++	   monitoring SMMU performance events.
++
+ config XGENE_PMU
+         depends on ARCH_XGENE || (COMPILE_TEST && 64BIT)
+         bool "APM X-Gene SoC PMU"
+diff --git a/drivers/perf/Makefile b/drivers/perf/Makefile
+index 16b3ec4db916..f732273eebe7 100644
+--- a/drivers/perf/Makefile
++++ b/drivers/perf/Makefile
+@@ -26,3 +26,4 @@ obj-$(CONFIG_ALIBABA_UNCORE_DRW_PMU) += alibaba_uncore_drw_pmu.o
+ obj-$(CONFIG_ARM_CORESIGHT_PMU_ARCH_SYSTEM_PMU) += arm_cspmu/
+ obj-$(CONFIG_MESON_DDR_PMU) += amlogic/
+ obj-$(CONFIG_CXL_PMU) += cxl_pmu.o
++obj-$(CONFIG_ARM_SMMU_PMU) += arm_smmu_pmu.o
+-- 
+2.34.1
+

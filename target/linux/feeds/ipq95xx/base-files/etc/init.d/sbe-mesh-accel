@@ -1,0 +1,21 @@
+#!/bin/sh /etc/rc.common
+# SBE1V1K: 6G 802.11s mesh backhaul vs ECM/SFE.
+# SFE fast_xmit hands accelerated packets straight to the egress netdev;
+# for an 802.11s mesh point (phy00.2-mesh) they were lost, so bridged and
+# routed flows to clients behind the mesh stalled after a few packets
+# (iperf3 control reset, HTTPS hangs). With fast_xmit off SFE still
+# accelerates those flows through the normal xmit path. Checked on the
+# two-unit setup 2026-11-13.
+START=99
+
+start() {
+	(
+		n=0
+		while [ ! -w /proc/sys/net/ecm/sfe_fast_xmit_enable ] && [ $n -lt 60 ]; do
+			sleep 2; n=$((n + 1))
+		done
+		[ -w /proc/sys/net/ecm/sfe_fast_xmit_enable ] || exit 0
+		echo 0 > /proc/sys/net/ecm/sfe_fast_xmit_enable
+		logger -t sbe-mesh-accel "SFE fast_xmit off (802.11s mesh backhaul)"
+	) &
+}
