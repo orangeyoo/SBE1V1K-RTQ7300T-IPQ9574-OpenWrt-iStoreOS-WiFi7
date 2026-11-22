@@ -1,0 +1,19 @@
+#!/bin/sh
+# SBE1V1K initramfs preinit hook (b9): EARLIEST attempt to place
+# cal-pci-*.bin (own ART slots) into the ath12k fork firmware dir.
+# MUST stay source-safe: /etc/preinit sources this file; no top-level
+# exit (an exit here kills the PID1 init shell - b8 lesson).  The
+# deterministic writer also runs as /etc/rc.d/S01sbe1v1k-wifi-caldata.
+
+[ -e /lib/sbe1v1k-caldata-lib.sh ] && . /lib/sbe1v1k-caldata-lib.sh
+
+sbe1v1k_caldata_preinit_hook() {
+	if command -v sbe1v1k_write_cal_pci >/dev/null 2>&1; then
+		sbe1v1k_write_cal_pci
+	else
+		echo "sbe1v1k-caldata: preinit hook - lib missing, skip" > /dev/console 2>/dev/null
+	fi
+	return 0
+}
+
+boot_hook_add preinit_main sbe1v1k_caldata_preinit_hook

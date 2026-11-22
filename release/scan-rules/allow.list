@@ -1,0 +1,8 @@
+# release/scan-rules/allow.list — reviewed exemptions. Every line needs a reason.
+# Format: <surface:/path regex> <tab> <rule-id regex> <tab> <reason>
+# Surfaces: rootfs:, fit:, src:, ui:
+^rootfs:/usr/share/openclash/openclash_streaming_unlock\.lua$	^cred\.ha$	OpenClash upstream: public Disney+ client token used by its streaming-unlock probe, not a credential of ours
+^rootfs:/usr/share/openclash/res/default\.yaml$	^cred\.privkey$	OpenClash upstream sample config: "-----BEGIN PRIVATE KEY-----" placeholder text, no key material
+^rootfs:/www/luci-static/resources/openclash/js/cm6\.min\.js$	^cred\.privkey$	CodeMirror bundle: PEM syntax-highlighting grammar string
+^(rootfs|src):/.*(GeoSite\.dat|geosite\.dat|Country\.mmdb)$	^brand\.qwrt$	third-party domain-list data (contains the domain name), not our branding
+^src:/package/orangeyoo-defaults/files/usr/sbin/factory-wireless-layout$	^ssid\.oem$	comment documents the OEM SSID scheme being replaced

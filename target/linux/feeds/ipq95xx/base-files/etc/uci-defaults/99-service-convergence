@@ -1,0 +1,27 @@
+#!/bin/sh
+# Wiro SBE1V1K: default service convergence (adapted from Orangeyoo 1.0).
+# 1.0 shipped a curated service set: in-scope daemons stay on, raw
+# engineering/test/broker daemons that 1.0 never shipped stay off.
+# On the 2.0 QSDK open profile the following are shipped enabled but are
+# out of the 1.0 product scope:
+#   sigma-dut   - vendor RF/protocol test agent, listens on the network
+#   radius      - freeRADIUS auth server (no product role)
+#   lldpd       - LLDP neighbor broadcaster (1.0 did not ship it)
+#   mcproxy     - multicast proxy daemon (no product role)
+# The boot-time `disable` removes the /etc/rc.d/S* symlink; on the
+# first boot the root is an overlay so the whiteout survives reboots.
+# Kept enabled on purpose (1.0 parity or inert): miniupnpd,
+# xl2tpd, pppoe-relay/server, openssl, udebug, sysstat.
+# syslog-ng is no longer shipped (generic.mk -syslog-ng): next to logd it
+# rebinds /dev/log and drains /proc/kmsg, logd then blocks in its kmsg read
+# and stops servicing the socket its early clients (netifd, hostapd,
+# dropbear) are connected to; their syslog() blocks forever (2.0-pre35:
+# 2.4G AP never started, network reload hung, SSH piled up).
+for svc in sigma-dut radius lldpd mcproxy; do
+	if [ -x /etc/init.d/$svc ]; then
+		if /etc/init.d/$svc disable 2>/dev/null; then
+			logger -t o2-hardening "service convergence: $svc disabled"
+		fi
+	fi
+done
+exit 0

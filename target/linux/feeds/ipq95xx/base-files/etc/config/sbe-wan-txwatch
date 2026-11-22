@@ -1,0 +1,3 @@
+config watchdog 'wan'
+	option enabled '1'
+	option device 'eth1'

@@ -1,0 +1,10 @@
+#!/bin/sh
+# iStoreOS look: argon theme as the LuCI base + default landing.
+# Argon ships as plain files (no luci-theme-argon package, whose own
+# uci-defaults would register it), so add it to the theme list ourselves;
+# without this the System > Language and Style theme menu had no Argon.
+uci -q set luci.themes.Argon='/luci-static/argon'
+uci -q set luci.main.mediaurlbase='/luci-static/argon'
+uci -q commit luci
+rm -f /tmp/luci-modulecache/ /tmp/luci-indexcache
+exit 0

@@ -1,0 +1,6 @@
+# SBE1V1K integration stub (2026-11-05): the official openwrt-patches workspace dir is
+# gitignored upstream and was not carried by the qsdk14 import. CodeLinaro is
+# rate-limited (429), so the official contents could not be fetched. These empty
+# Config.in stubs satisfy the two hard source refs in config/Config-build.in
+# (lines 147/152); the include/download.mk and include/package.mk openwrt-patches
+# hooks degrade gracefully on empty dir (wildcard/-include).

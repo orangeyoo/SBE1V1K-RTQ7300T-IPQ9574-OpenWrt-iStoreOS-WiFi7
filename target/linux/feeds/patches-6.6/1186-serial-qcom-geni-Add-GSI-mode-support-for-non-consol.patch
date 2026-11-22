@@ -1,0 +1,2011 @@
+From a941730f042f4dcc3f0de50e6cbf4c5c16fb5320 Mon Sep 17 00:00:00 2001
+From: Devi Priya <devipriy@qti.qualcomm.com>
+Date: Mon, 8 Jun 2026 17:36:29 +0530
+Subject: [PATCH] serial: qcom-geni: Add GSI mode support for non-console UART
+
+Currently UART supports only FIFO and DMA modes.
+This change adds GSI mode support for non-console UART
+by loading the required GSI firmware and initializing
+the GSI registers before configuring the SE to operate in GSI mode.
+
+Change-Id: I4a66413836096f7e1cf41a30e9d85d4e29f1e5b0
+Signed-off-by: Devi Priya <devipriy@qti.qualcomm.com>
+---
+ drivers/dma/qcom/gpi.c                | 605 +++++++++++++++-
+ drivers/tty/serial/qcom_geni_serial.c | 964 +++++++++++++++++++++++++-
+ include/linux/dma/qcom-gpi-dma.h      |  90 +++
+ 3 files changed, 1631 insertions(+), 28 deletions(-)
+
+diff --git a/drivers/dma/qcom/gpi.c b/drivers/dma/qcom/gpi.c
+index 1c93864e0e4d..ed5e5e758f3f 100644
+--- a/drivers/dma/qcom/gpi.c
++++ b/drivers/dma/qcom/gpi.c
+@@ -6,12 +6,14 @@
+ 
+ #include <dt-bindings/dma/qcom-gpi.h>
+ #include <linux/bitfield.h>
++#include <linux/delay.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/dmaengine.h>
+ #include <linux/module.h>
+ #include <linux/of_dma.h>
+ #include <linux/platform_device.h>
+ #include <linux/dma/qcom-gpi-dma.h>
++#include <linux/firmware.h>
+ #include <linux/scatterlist.h>
+ #include <linux/slab.h>
+ #include "../dmaengine.h"
+@@ -62,6 +64,22 @@
+ #define TRE_I2C_GO_ADDR		GENMASK(14, 8)
+ #define TRE_I2C_GO_STRETCH	BIT(26)
+ 
++/* UART Config0 WD0 */
++#define TRE_UART_C0_CHAR_SIZE	GENMASK(2, 0)
++#define TRE_UART_C0_STOP_BITS	GENMASK(4, 3)
++#define TRE_UART_C0_PARITY	GENMASK(7, 5)
++#define TRE_UART_C0_FLAGS	GENMASK(15, 8)
++#define TRE_UART_C0_HUNT_CHAR	GENMASK(23, 16)
++#define TRE_UART_C0_PACK_EN	BIT(24)
++
++/* UART Config0 WD1 */
++#define TRE_UART_C0_RX_STALE	GENMASK(23, 0)
++#define TRE_UART_C0_RFR_LEVEL	GENMASK(31, 24)
++
++/* UART GO WD0 */
++#define TRE_UART_GO_CMD		GENMASK(7, 0)
++#define TRE_UART_GO_EN_HUNT	BIT(8)
++
+ /* DMA TRE */
+ #define TRE_DMA_LEN		GENMASK(23, 0)
+ 
+@@ -216,10 +234,68 @@ enum CNTXT_OFFS {
+ #define GPII_n_CH_k_SCRATCH_2_OFFS(n, k)	(0x20068 + (0x4000 * (n)) + (0x80 * (k)))
+ #define GPII_n_CH_k_SCRATCH_3_OFFS(n, k)	(0x2006C + (0x4000 * (n)) + (0x80 * (k)))
+ 
++/* GSI initialization registers */
++#define GSI_CFG_OFFS                           0x4000
++#define GSI_CFG_GSI_ENABLE                     BIT(0)
++#define GSI_CFG_DOUBLE_MCS_CLK_FREQ            BIT(2)
++
++#define GSI_MCS_CFG_OFFS                       0xF000
++#define GSI_MCS_CFG_MCS_ENABLE                 BIT(0)
++
++#define GSI_PERIPH_BASE_ADDR_LSB_OFFS          0x04018
++#define GSI_PERIPH_BASE_ADDR_MSB_OFFS          0x0401c
++
++#define GSI_MANAGER_EE_QOS_n_OFFS(n)           (0x4300 + (0x4 * (n)))
++
++#define GSI_IRAM_PTR_OFFS		       0x50000
++#define GSI_IRAM_SIZE			       0x4DC0
++
++#define GSI_MCS_CODE_VER_OFFS                  0x4008
++
++/* IEP (Interrupt Entry Point) registers */
++#define GSI_IRAM_PTR_CH_CMD_OFFS               0x04400
++#define GSI_IRAM_PTR_EE_GENERIC_CMD_OFFS       0x04404
++#define GSI_IRAM_PTR_TLV_CH_NOT_FULL_OFFS      0x04408
++#define GSI_IRAM_PTR_CH_DB_OFFS                0x04418
++#define GSI_IRAM_PTR_EV_DB_OFFS                0x0441c
++#define GSI_IRAM_PTR_NEW_RE_OFFS               0x04420
++#define GSI_IRAM_PTR_CH_DIS_COMP_OFFS          0x04424
++#define GSI_IRAM_PTR_CH_EMPTY_OFFS             0x04428
++#define GSI_IRAM_PTR_EVENT_GEN_COMP_OFFS       0x0442c
++#define GSI_IRAM_PTR_PERIPH_IF_TLV_IN_0_OFFS   0x04430
++#define GSI_IRAM_PTR_TIMER_EXPIRED_OFFS        0x0443c
++#define GSI_IRAM_PTR_INT_MOD_STOPED_OFFS       0x0444c
++
++/* EE generic command register — used to boot the MCS sequencer after enable */
++#define GPII_n_EE_GENERIC_CMD_OFFS(n)		(0x23018 + (0x4000 * (n)))
++#define GSI_EE_GENERIC_CMD_INIT			0x81
++
++#define GSI_EE_n_GSI_STATUS_OFFS(n)             (0x13000 + (0x4000 * (n)))
++#define GSI_EE_n_GSI_STATUS_ENABLED             BIT(0)
++
+ struct __packed gpi_tre {
+ 	u32 dword[4];
+ };
+ 
++/* Structure to hold all IEP values */
++struct gsi_iep_values {
++	u32 ch_cmd;
++	u32 ch_db;
++	u32 ev_db;
++	u32 new_re;
++	u32 ch_dis_comp;
++	u32 ch_empty;
++	u32 event_gen_comp;
++	u32 int_mod_stopped;
++	u32 ee_generic_cmd;
++	u32 periph_if_tlv_in_0;
++	u32 periph_if_tlv_in_1;
++	u32 periph_if_tlv_in_2;
++	u32 timer_expired;
++	u32 write_eng_comp;
++	u32 read_eng_comp;
++};
++
+ enum msm_gpi_tce_code {
+ 	MSM_GPI_TCE_SUCCESS = 1,
+ 	MSM_GPI_TCE_EOT = 2,
+@@ -474,6 +550,8 @@ struct gpi_dev {
+ 	u32 gpii_mask; /* gpii instances available for apps */
+ 	u32 ev_factor; /* ev ring length factor */
+ 	struct gpii *gpiis;
++	bool gsi_standalone;
++	bool gsi_init_done;
+ };
+ 
+ struct reg_info {
+@@ -522,7 +600,7 @@ struct gpii {
+ 	bool ieob_set;
+ };
+ 
+-#define MAX_TRE 3
++#define MAX_TRE 6
+ 
+ struct gpi_desc {
+ 	struct virt_dma_desc vd;
+@@ -541,6 +619,7 @@ static irqreturn_t gpi_handle_irq(int irq, void *data);
+ static void gpi_ring_recycle_ev_element(struct gpi_ring *ring);
+ static int gpi_ring_add_element(struct gpi_ring *ring, void **wp);
+ static void gpi_process_events(struct gpii *gpii);
++static int gsi_standalone_init(struct gpi_dev *gpi_dev);
+ 
+ static inline struct gchan *to_gchan(struct dma_chan *dma_chan)
+ {
+@@ -1095,6 +1174,11 @@ static void gpi_process_events(struct gpii *gpii)
+ 	union gpi_event *gpi_event;
+ 	struct gchan *gchan;
+ 	u32 chid, type;
++	struct virt_dma_desc *vd;
++	struct gpi_desc *gpi_desc;
++	struct qcom_gpi_dma_async_tx_cb_param *tx_cb_param;
++	unsigned long flags;
++	u32 byte_count;
+ 
+ 	cntxt_rp = gpi_read_reg(gpii, gpii->ev_ring_rp_lsb_reg);
+ 	rp = to_virtual(ev_ring, cntxt_rp);
+@@ -1127,6 +1211,52 @@ static void gpi_process_events(struct gpii *gpii)
+ 				break;
+ 			case QUP_NOTIF_EV_TYPE:
+ 				dev_dbg(gpii->gpi_dev->dev, "QUP_NOTIF_EV_TYPE\n");
++				gchan = &gpii->gchan[chid];
++				byte_count = gpi_event->qup_notif_event.count & 0xFFFFFF;
++
++				if (byte_count == 0) {
++					dev_info(gpii->gpi_dev->dev,
++						 "QUP_NOTIF: chid=%u count=0, skipping GO-TRE ack\n",
++						 chid);
++					break;
++				}
++
++				/* Only process if channel is active */
++				if (unlikely(gchan->pm_state != ACTIVE_STATE)) {
++					dev_err(gpii->gpi_dev->dev,
++						"QUP_NOTIF: skipping, ch @ %s state\n",
++						TO_GPI_PM_STR(gchan->pm_state));
++					break;
++				}
++
++				spin_lock_irqsave(&gchan->vc.lock, flags);
++				vd = vchan_next_desc(&gchan->vc);
++				if (!vd) {
++					spin_unlock_irqrestore(&gchan->vc.lock, flags);
++					dev_dbg(gpii->gpi_dev->dev,
++						"QUP_NOTIF: no pending descriptor\n");
++					break;
++				}
++				gpi_desc = to_gpi_desc(vd);
++				spin_unlock_irqrestore(&gchan->vc.lock, flags);
++
++				/* Populate callback parameters with QUP_NOTIF data */
++				tx_cb_param = vd->tx.callback_param;
++				if (vd->tx.callback && tx_cb_param) {
++					tx_cb_param->length = byte_count;
++					tx_cb_param->completion_code = QCOM_GPI_TCE_SUCCESS;
++					tx_cb_param->status = gpi_event->qup_notif_event.status;
++
++					dma_cookie_complete(&vd->tx);
++					vd->tx.callback(tx_cb_param);
++				}
++
++				/* Free the descriptor */
++				spin_lock_irqsave(&gchan->vc.lock, flags);
++				list_del(&vd->node);
++				spin_unlock_irqrestore(&gchan->vc.lock, flags);
++				kfree(gpi_desc);
++
+ 				break;
+ 			default:
+ 				dev_dbg(gpii->gpi_dev->dev,
+@@ -1709,6 +1839,68 @@ static int gpi_create_i2c_tre(struct gchan *chan, struct gpi_desc *desc,
+ 	return tre_idx;
+ }
+ 
++static int gpi_create_uart_tre(struct gchan *chan, struct gpi_desc *desc,
++			       struct scatterlist *sgl, enum dma_transfer_direction direction)
++{
++	struct gpi_uart_config *uart = chan->config;
++	unsigned int tre_idx = 0;
++	dma_addr_t address;
++	struct gpi_tre *tre;
++
++	/* first create config tre if applicable */
++	if (direction == DMA_MEM_TO_DEV && uart->set_config) {
++		tre = &desc->tre[tre_idx];
++		tre_idx++;
++
++		tre->dword[0] = u32_encode_bits(uart->char_size, TRE_UART_C0_CHAR_SIZE);
++		tre->dword[0] |= u32_encode_bits(uart->stop_bits, TRE_UART_C0_STOP_BITS);
++		tre->dword[0] |= u32_encode_bits(uart->parity, TRE_UART_C0_PARITY);
++		tre->dword[0] |= u32_encode_bits(uart->flags, TRE_UART_C0_FLAGS);
++		tre->dword[0] |= u32_encode_bits(uart->hunt_char, TRE_UART_C0_HUNT_CHAR);
++		tre->dword[0] |= u32_encode_bits(uart->pack_en, TRE_UART_C0_PACK_EN);
++
++		tre->dword[1] = u32_encode_bits(uart->rx_stale, TRE_UART_C0_RX_STALE);
++		tre->dword[1] |= u32_encode_bits(uart->rfr_level, TRE_UART_C0_RFR_LEVEL);
++
++		tre->dword[2] = u32_encode_bits(uart->clk_div, TRE_C0_CLK_DIV);
++		tre->dword[2] |= u32_encode_bits(uart->clk_src, TRE_C0_CLK_SRC);
++
++		tre->dword[3] = u32_encode_bits(TRE_TYPE_CONFIG0, TRE_FLAGS_TYPE);
++		tre->dword[3] |= u32_encode_bits(1, TRE_FLAGS_CHAIN);
++	}
++
++	/* create the GO tre for TX */
++	if (direction == DMA_MEM_TO_DEV) {
++		tre = &desc->tre[tre_idx];
++		tre_idx++;
++
++		tre->dword[0] = u32_encode_bits(uart->command, TRE_UART_GO_CMD);
++		tre->dword[0] |= u32_encode_bits(uart->en_hunt, TRE_UART_GO_EN_HUNT);
++
++		tre->dword[1] = 0;
++		tre->dword[2] = 0;
++
++		tre->dword[3] = u32_encode_bits(TRE_TYPE_GO, TRE_FLAGS_TYPE);
++		tre->dword[3] |= u32_encode_bits(1, TRE_FLAGS_CHAIN);
++	}
++
++	/* create the dma tre */
++	tre = &desc->tre[tre_idx];
++	tre_idx++;
++
++	address = sg_dma_address(sgl);
++	tre->dword[0] = lower_32_bits(address);
++	tre->dword[1] = upper_32_bits(address);
++
++	tre->dword[2] = u32_encode_bits(sg_dma_len(sgl), TRE_DMA_LEN);
++
++	tre->dword[3] = u32_encode_bits(TRE_TYPE_DMA, TRE_FLAGS_TYPE);
++	if (direction == DMA_MEM_TO_DEV)
++		tre->dword[3] |= u32_encode_bits(1, TRE_FLAGS_IEOT);
++
++	return tre_idx;
++}
++
+ static int gpi_create_spi_tre(struct gchan *chan, struct gpi_desc *desc,
+ 			      struct scatterlist *sgl, enum dma_transfer_direction direction)
+ {
+@@ -1807,17 +1999,23 @@ gpi_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
+ 		return NULL;
+ 	}
+ 
+-	if (sg_len > 1) {
++	/* SPI and I2C support only a single SG element; UART uses pre-built multi-SG TREs */
++	if (sg_len > 1 && gchan->protocol != QCOM_GPI_UART) {
+ 		dev_err(dev, "Multi sg sent, we support only one atm: %d\n", sg_len);
+ 		return NULL;
+ 	}
+ 
+-	nr_tre = 3;
+-	set_config = *(u32 *)gchan->config;
+-	if (!set_config)
+-		nr_tre = 2;
+-	if (direction == DMA_DEV_TO_MEM) /* rx */
+-		nr_tre = 1;
++	/* For UART multi-SG (pre-built TREs), nr_tre equals the SG count directly */
++	if (gchan->protocol == QCOM_GPI_UART && sg_len > 1) {
++		nr_tre = sg_len;
++	} else {
++		nr_tre = 3;
++		set_config = *(u32 *)gchan->config;
++		if (!set_config)
++			nr_tre = 2;
++		if (direction == DMA_DEV_TO_MEM) /* rx */
++			nr_tre = 1;
++	}
+ 
+ 	/* calculate # of elements required & available */
+ 	nr = gpi_ring_num_elements_avail(ch_ring);
+@@ -1835,6 +2033,30 @@ gpi_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
+ 		i = gpi_create_spi_tre(gchan, gpi_desc, sgl, direction);
+ 	} else if (gchan->protocol == QCOM_GPI_I2C) {
+ 		i = gpi_create_i2c_tre(gchan, gpi_desc, sgl, direction);
++	} else if (gchan->protocol == QCOM_GPI_UART) {
++		if (sg_len > 1) {
++			/*
++			 * Pre-built TREs passed as SG elements.
++			 * Each SG element is exactly one gpi_tre
++			 * (16 bytes). Mirrors gpi_msm.c gpi_prep_slave_sg()
++			 * which iterates SG elements and copies each as a TRE.
++			 */
++			struct scatterlist *sg;
++			int k;
++
++			if (sg_len > MAX_TRE) {
++				dev_err(dev, "UART: too many TREs: %u (max %u)\n",
++					sg_len, MAX_TRE);
++				kfree(gpi_desc);
++				return NULL;
++			}
++			for_each_sg(sgl, sg, sg_len, k)
++				memcpy(&gpi_desc->tre[k], sg_virt(sg),
++				       sizeof(struct gpi_tre));
++			i = sg_len;
++		} else {
++			i = gpi_create_uart_tre(gchan, gpi_desc, sgl, direction);
++		}
+ 	} else {
+ 		dev_err(dev, "invalid peripheral: %d\n", gchan->protocol);
+ 		kfree(gpi_desc);
+@@ -1987,7 +2209,7 @@ static void gpi_free_chan_resources(struct dma_chan *chan)
+ 	write_unlock_irq(&gpii->pm_lock);
+ 
+ 	/* attempt to do graceful hardware shutdown */
+-	if (cur_state == ACTIVE_STATE) {
++	if (cur_state == ACTIVE_STATE || cur_state == PREPARE_TERMINATE) {
+ 		gpi_stop_chan(gchan);
+ 
+ 		ret = gpi_send_cmd(gpii, gchan, GPI_CH_CMD_RESET);
+@@ -2044,8 +2266,16 @@ static int gpi_alloc_chan_resources(struct dma_chan *chan)
+ {
+ 	struct gchan *gchan = to_gchan(chan);
+ 	struct gpii *gpii = gchan->gpii;
++	struct gpi_dev *gpi_dev = gpii->gpi_dev;
+ 	int ret;
+ 
++	if (gpi_dev->gsi_standalone && !gpi_dev->gsi_init_done) {
++		ret = gsi_standalone_init(gpi_dev);
++		if (ret)
++			return ret;
++		gpi_dev->gsi_init_done = true;
++	}
++
+ 	mutex_lock(&gpii->ctrl_lock);
+ 
+ 	/* allocate memory for transfer ring */
+@@ -2148,6 +2378,359 @@ static struct dma_chan *gpi_of_dma_xlate(struct of_phandle_args *args,
+ 	return dma_get_slave_channel(&gchan->vc.chan);
+ }
+ 
++/*
++ * GSI Firmware loading via request_firmware()
++ *
++ * Binary format of qupv3_gsi_firmware.bin:
++ *   [0..3]   magic 0x47534946 ("GSIF")
++ *   [4..5]   iep_count (u16 LE)
++ *   [6..7]   reserved
++ *   [8..11]  num_instructions (u32 LE)
++ *   [12 ..]  IEP records: iep_count × (32-byte name + u32 offset LE)
++ *   [12 + iep_count*36 ..]  instructions: num_instructions × 6 bytes
++ */
++
++#define GSI_FW_PATH		"qupv3_gsi_firmware.bin"
++#define GSI_FW_MAGIC		0x47534946U
++#define GSI_FW_IEP_NAME_LEN	32
++
++struct gsi_fw_hdr {
++	__le32 magic;
++	__le16 iep_count;
++	__le16 reserved;
++	__le32 num_instructions;
++} __packed;
++
++struct gsi_fw_iep_rec {
++	u8  name[GSI_FW_IEP_NAME_LEN];
++	__le32 offset;
++} __packed;
++
++/* Load all IEP values from the parsed firmware blob */
++static void gsi_load_all_ieps(struct gpi_dev *gpi_dev,
++			      struct gsi_iep_values *ieps,
++			      const struct gsi_fw_iep_rec *rec,
++			      u16 count)
++{
++	u16 i;
++
++	memset(ieps, 0, sizeof(*ieps));
++
++	for (i = 0; i < count; i++) {
++		u32 off = le32_to_cpu(rec[i].offset);
++		const char *name = rec[i].name;
++
++		if (!strncmp(name, "GSI_IRAM_PTR_CH_CMD", GSI_FW_IEP_NAME_LEN))
++			ieps->ch_cmd = off;
++		else if (!strncmp(name, "GSI_IRAM_PTR_CH_DB", GSI_FW_IEP_NAME_LEN))
++			ieps->ch_db = off;
++		else if (!strncmp(name, "GSI_IRAM_PTR_EV_DB", GSI_FW_IEP_NAME_LEN))
++			ieps->ev_db = off;
++		else if (!strncmp(name, "GSI_IRAM_PTR_NEW_RE", GSI_FW_IEP_NAME_LEN))
++			ieps->new_re = off;
++		else if (!strncmp(name, "GSI_IRAM_PTR_CH_DIS_COMP", GSI_FW_IEP_NAME_LEN))
++			ieps->ch_dis_comp = off;
++		else if (!strncmp(name, "GSI_IRAM_PTR_CH_EMPTY", GSI_FW_IEP_NAME_LEN))
++			ieps->ch_empty = off;
++		else if (!strncmp(name, "GSI_IRAM_PTR_EVENT_GEN_COMP", GSI_FW_IEP_NAME_LEN))
++			ieps->event_gen_comp = off;
++		else if (!strncmp(name, "GSI_IRAM_PTR_INT_MOD_STOPED", GSI_FW_IEP_NAME_LEN))
++			ieps->int_mod_stopped = off;
++		else if (!strncmp(name, "GSI_IRAM_PTR_EE_GENERIC_CMD", GSI_FW_IEP_NAME_LEN))
++			ieps->ee_generic_cmd = off;
++		else if (!strncmp(name, "GSI_IRAM_PTR_PERIPH_IF_TLV_IN_0", GSI_FW_IEP_NAME_LEN))
++			ieps->periph_if_tlv_in_0 = off;
++		else if (!strncmp(name, "GSI_IRAM_PTR_TIMER_EXPIRED", GSI_FW_IEP_NAME_LEN))
++			ieps->timer_expired = off;
++	}
++
++	dev_dbg(gpi_dev->dev,
++		"IEPs: CH_CMD=%u CH_DB=%u NEW_RE=%u EE_GENERIC_CMD=%u\n",
++		ieps->ch_cmd, ieps->ch_db, ieps->new_re, ieps->ee_generic_cmd);
++	dev_dbg(gpi_dev->dev,
++		"IEPs: CH_DIS_COMP=%u CH_EMPTY=%u EVENT_GEN_COMP=%u INT_MOD_STOPED=%u\n",
++		ieps->ch_dis_comp, ieps->ch_empty, ieps->event_gen_comp,
++		ieps->int_mod_stopped);
++	dev_dbg(gpi_dev->dev,
++		"IEPs: PERIPH_IF_TLV_IN_0=%u TIMER_EXPIRED=%u\n",
++		ieps->periph_if_tlv_in_0, ieps->timer_expired);
++}
++
++static void gsi_setup_all_ieps(struct gpi_dev *gpi_dev,
++			       const struct gsi_iep_values *ieps)
++{
++	void __iomem *gsi_base = gpi_dev->regs;
++
++	if (ieps->ch_cmd)
++		writel_relaxed(ieps->ch_cmd,
++			       gsi_base + GSI_IRAM_PTR_CH_CMD_OFFS);
++
++	if (ieps->ch_db)
++		writel_relaxed(ieps->ch_db,
++			       gsi_base + GSI_IRAM_PTR_CH_DB_OFFS);
++
++	if (ieps->ev_db)
++		writel_relaxed(ieps->ev_db,
++			       gsi_base + GSI_IRAM_PTR_EV_DB_OFFS);
++
++	if (ieps->new_re)
++		writel_relaxed(ieps->new_re,
++			       gsi_base + GSI_IRAM_PTR_NEW_RE_OFFS);
++
++	if (ieps->ch_dis_comp)
++		writel_relaxed(ieps->ch_dis_comp,
++			       gsi_base + GSI_IRAM_PTR_CH_DIS_COMP_OFFS);
++
++	if (ieps->ch_empty)
++		writel_relaxed(ieps->ch_empty,
++			       gsi_base + GSI_IRAM_PTR_CH_EMPTY_OFFS);
++
++	if (ieps->event_gen_comp)
++		writel_relaxed(ieps->event_gen_comp,
++			       gsi_base + GSI_IRAM_PTR_EVENT_GEN_COMP_OFFS);
++
++	if (ieps->int_mod_stopped)
++		writel_relaxed(ieps->int_mod_stopped,
++			       gsi_base + GSI_IRAM_PTR_INT_MOD_STOPED_OFFS);
++
++	if (ieps->ee_generic_cmd)
++		writel_relaxed(ieps->ee_generic_cmd,
++			       gsi_base + GSI_IRAM_PTR_EE_GENERIC_CMD_OFFS);
++
++	if (ieps->periph_if_tlv_in_0)
++		writel_relaxed(ieps->periph_if_tlv_in_0,
++			       gsi_base + GSI_IRAM_PTR_PERIPH_IF_TLV_IN_0_OFFS);
++
++	if (ieps->timer_expired)
++		writel_relaxed(ieps->timer_expired,
++			       gsi_base + GSI_IRAM_PTR_TIMER_EXPIRED_OFFS);
++
++	/* Ensure all IEP pointer writes are visible to hardware before return */
++	wmb();
++	dev_dbg(gpi_dev->dev, "IEP pointers configured\n");
++}
++
++/* Program GSI IRAM from the firmware blob */
++static int gsi_program_iram(struct gpi_dev *gpi_dev,
++			    const u8 *instr_data, u32 num_instructions)
++{
++	void __iomem *iram_base = gpi_dev->regs + GSI_IRAM_PTR_OFFS;
++	u32 i, ver_val, rb_lo, rb_hi;
++	u64 instruction;
++	const u8 *bytes;
++
++	if (num_instructions * 8 > GSI_IRAM_SIZE) {
++		dev_err(gpi_dev->dev,
++			"Firmware too large: %u instructions (max %u)\n",
++			num_instructions, GSI_IRAM_SIZE / 8);
++		return -EINVAL;
++	}
++
++	/*
++	 * Write firmware version word to MCS_CODE_VER before loading IRAM.
++	 * Instructions are big-endian (MSB-first): bytes[0]=bit47, bytes[5]=bit0.
++	 * dword0 (bits 31:0) = bytes[2..5] big-endian = the version word.
++	 */
++	bytes = instr_data;
++	ver_val = ((u32)bytes[2] << 24) | ((u32)bytes[3] << 16) |
++		  ((u32)bytes[4] <<  8) |  (u32)bytes[5];
++	dev_dbg(gpi_dev->dev,
++		"DBG: writing MCS_CODE_VER=0x%08x to offset 0x%x\n",
++		ver_val, GSI_MCS_CODE_VER_OFFS);
++	writel_relaxed(ver_val, gpi_dev->regs + GSI_MCS_CODE_VER_OFFS);
++	/* Flush the version write before readback to confirm it landed. */
++	wmb();
++	ver_val = readl_relaxed(gpi_dev->regs + GSI_MCS_CODE_VER_OFFS);
++	dev_dbg(gpi_dev->dev,
++		"DBG: MCS_CODE_VER readback after write=0x%08x\n",
++		ver_val);
++
++	dev_dbg(gpi_dev->dev,
++		"DBG: IRAM base offset=0x%x, regs=%p, iram_base=%p\n",
++		GSI_IRAM_PTR_OFFS, gpi_dev->regs, iram_base);
++
++	/* Write each 48-bit instruction to IRAM */
++	for (i = 0; i < num_instructions; i++) {
++		bytes = instr_data + (i * 6);
++
++		/*
++		 * Instructions are big-endian (MSB-first): bytes[0]=bit47.
++		 * Assemble to 48-bit value; write dword0 to even slot, dword1
++		 * (16 bits) to odd slot.
++		 */
++		instruction  = ((u64)bytes[0] << 40);
++		instruction |= ((u64)bytes[1] << 32);
++		instruction |= ((u64)bytes[2] << 24);
++		instruction |= ((u64)bytes[3] << 16);
++		instruction |= ((u64)bytes[4] <<  8);
++		instruction |=  (u64)bytes[5];
++
++		writel_relaxed(lower_32_bits(instruction),
++			       iram_base + (i * 8));
++		writel_relaxed((u32)(instruction >> 32) & 0xFFFF,
++			       iram_base + (i * 8) + 4);
++
++		if (i < 4) {
++			dev_dbg(gpi_dev->dev,
++				"DBG: IRAM[%u] offset=0x%x lo=0x%08x hi=0x%04x\n",
++				i, (u32)(GSI_IRAM_PTR_OFFS + i * 8),
++				lower_32_bits(instruction),
++				(u32)(instruction >> 32) & 0xFFFF);
++		}
++	}
++
++	/* Flush all IRAM writes to hardware before readback verification. */
++	wmb();
++
++	/* Readback first slot to verify IRAM write landed */
++	rb_lo = readl_relaxed(iram_base);
++	rb_hi = readl_relaxed(iram_base + 4);
++	dev_dbg(gpi_dev->dev,
++		"DBG: IRAM[0] readback lo=0x%08x hi=0x%04x\n",
++		rb_lo, rb_hi & 0xFFFF);
++	dev_dbg(gpi_dev->dev, "DBG: IRAM programming complete: %u instructions\n",
++		num_instructions);
++	return 0;
++}
++
++/* Complete GSI initialization using firmware loaded via request_firmware() */
++static int gsi_standalone_init(struct gpi_dev *gpi_dev)
++{
++	void __iomem *gsi_base = gpi_dev->regs;
++	const struct firmware *fw;
++	const struct gsi_fw_hdr *hdr;
++	const struct gsi_fw_iep_rec *iep_recs;
++	const u8 *instr_data;
++	struct gsi_iep_values ieps;
++	size_t min_size, iep_section_size;
++	u16 iep_count;
++	u32 num_instructions;
++	u32 val;
++	int ret;
++
++	ret = request_firmware(&fw, GSI_FW_PATH, gpi_dev->dev);
++	if (ret) {
++		if (ret == -ENOENT) {
++			dev_dbg(gpi_dev->dev,
++				"GSI firmware '%s' not yet available, deferring probe\n",
++				GSI_FW_PATH);
++			return -EPROBE_DEFER;
++		}
++		dev_err(gpi_dev->dev, "Failed to load GSI firmware '%s': %d\n",
++			GSI_FW_PATH, ret);
++		return ret;
++	}
++
++	/* Validate header */
++	if (fw->size < sizeof(*hdr)) {
++		dev_err(gpi_dev->dev, "GSI firmware too small (%zu bytes)\n", fw->size);
++		ret = -EINVAL;
++		goto out_release;
++	}
++
++	hdr = (const struct gsi_fw_hdr *)fw->data;
++
++	if (le32_to_cpu(hdr->magic) != GSI_FW_MAGIC) {
++		dev_err(gpi_dev->dev, "GSI firmware bad magic: 0x%08x\n",
++			le32_to_cpu(hdr->magic));
++		ret = -EINVAL;
++		goto out_release;
++	}
++
++	iep_count       = le16_to_cpu(hdr->iep_count);
++	num_instructions = le32_to_cpu(hdr->num_instructions);
++
++	iep_section_size = (size_t)iep_count * sizeof(struct gsi_fw_iep_rec);
++	min_size = sizeof(*hdr) + iep_section_size +
++		   (size_t)num_instructions * 6;
++
++	if (fw->size < min_size) {
++		dev_err(gpi_dev->dev,
++			"GSI firmware truncated: expected %zu, got %zu\n",
++			min_size, fw->size);
++		ret = -EINVAL;
++		goto out_release;
++	}
++
++	iep_recs   = (const struct gsi_fw_iep_rec *)(fw->data + sizeof(*hdr));
++	instr_data = fw->data + sizeof(*hdr) + iep_section_size;
++
++	dev_dbg(gpi_dev->dev, "GSI firmware: %u IEPs, %u instructions\n",
++		iep_count, num_instructions);
++
++	/* Step 1: Hardware pre-check */
++	val = readl_relaxed(gsi_base + GSI_CFG_OFFS);
++	if (val & GSI_CFG_GSI_ENABLE) {
++		dev_dbg(gpi_dev->dev,
++			"GSI already enabled, performing re-initialization\n");
++		val &= ~GSI_CFG_GSI_ENABLE;
++		writel_relaxed(val, gsi_base + GSI_CFG_OFFS);
++		/* Ensure GSI_ENABLE is deasserted before the reset delay. */
++		wmb();
++		usleep_range(100, 200);
++	}
++
++	/* Set peripheral base */
++	writel_relaxed(0, gsi_base + GSI_PERIPH_BASE_ADDR_LSB_OFFS);
++	writel_relaxed(0, gsi_base + GSI_PERIPH_BASE_ADDR_MSB_OFFS);
++	/* Flush peripheral base writes before IEP and IRAM programming. */
++	wmb();
++
++	/* Load IEPs from firmware and program hardware registers */
++	gsi_load_all_ieps(gpi_dev, &ieps, iep_recs, iep_count);
++	gsi_setup_all_ieps(gpi_dev, &ieps);
++
++	/* Program IRAM from firmware blob */
++	ret = gsi_program_iram(gpi_dev, instr_data, num_instructions);
++	if (ret)
++		goto out_release;
++
++	val = readl_relaxed(gsi_base + GSI_MCS_CFG_OFFS);
++	val |= GSI_MCS_CFG_MCS_ENABLE;
++	writel_relaxed(val, gsi_base + GSI_MCS_CFG_OFFS);
++	/* Flush MCS_ENABLE write before reading back GSI_CFG. */
++	wmb();
++
++	/* Enable GSI core with double clock */
++	val = readl_relaxed(gsi_base + GSI_CFG_OFFS);
++	val |= GSI_CFG_DOUBLE_MCS_CLK_FREQ;
++	writel_relaxed(val, gsi_base + GSI_CFG_OFFS);
++	/* Flush double-clock write before asserting GSI_ENABLE. */
++	wmb();
++	val |= GSI_CFG_GSI_ENABLE;
++	writel_relaxed(val, gsi_base + GSI_CFG_OFFS);
++	/* Flush GSI_ENABLE write before reading back to confirm. */
++	wmb();
++	val = readl_relaxed(gsi_base + GSI_CFG_OFFS);
++	dev_info(gpi_dev->dev, "GSI Core Initialization Success!\n");
++
++	/* Validate firmware version after MCS is running */
++	val = readl_relaxed(gsi_base + GSI_MCS_CODE_VER_OFFS);
++	if (val == 0 || val == 0xFFFFFFFF) {
++		dev_err(gpi_dev->dev, "Invalid firmware version: 0x%08x\n", val);
++		ret = -EINVAL;
++		goto err_disable;
++	}
++	dev_info(gpi_dev->dev, "GSI Firmware Version: 0x%08x\n", val);
++
++	release_firmware(fw);
++	return 0;
++
++err_disable:
++	dev_err(gpi_dev->dev, "Initialization failed, cleaning up\n");
++	val = readl_relaxed(gsi_base + GSI_MCS_CFG_OFFS);
++	val &= ~GSI_MCS_CFG_MCS_ENABLE;
++	writel_relaxed(val, gsi_base + GSI_MCS_CFG_OFFS);
++	val = readl_relaxed(gsi_base + GSI_CFG_OFFS);
++	val &= ~GSI_CFG_GSI_ENABLE;
++	writel_relaxed(val, gsi_base + GSI_CFG_OFFS);
++	/* Flush disable writes before releasing firmware and returning. */
++	wmb();
++out_release:
++	release_firmware(fw);
++	return ret;
++}
++
+ static int gpi_probe(struct platform_device *pdev)
+ {
+ 	struct gpi_dev *gpi_dev;
+@@ -2245,8 +2828,10 @@ static int gpi_probe(struct platform_device *pdev)
+ 		gpii->gpi_dev = gpi_dev;
+ 	}
+ 
+-	platform_set_drvdata(pdev, gpi_dev);
++	if (of_property_read_bool(gpi_dev->dev->of_node, "qcom,gsi-standalone-init"))
++		gpi_dev->gsi_standalone = true;
+ 
++	platform_set_drvdata(pdev, gpi_dev);
+ 	/* clear and Set capabilities */
+ 	dma_cap_zero(gpi_dev->dma_device.cap_mask);
+ 	dma_cap_set(DMA_SLAVE, gpi_dev->dma_device.cap_mask);
+diff --git a/drivers/tty/serial/qcom_geni_serial.c b/drivers/tty/serial/qcom_geni_serial.c
+index ef5173c0eb62..bdf28b21e64f 100644
+--- a/drivers/tty/serial/qcom_geni_serial.c
++++ b/drivers/tty/serial/qcom_geni_serial.c
+@@ -16,6 +16,9 @@
+ #include <linux/pm_runtime.h>
+ #include <linux/pm_wakeirq.h>
+ #include <linux/soc/qcom/geni-se.h>
++#include <linux/dmaengine.h>
++#include <linux/dma/qcom-gpi-dma.h>
++#include <linux/dma-mapping.h>
+ #include <linux/serial.h>
+ #include <linux/serial_core.h>
+ #include <linux/slab.h>
+@@ -75,8 +78,12 @@
+ #define UART_OVERSAMPLING		32
+ #define STALE_TIMEOUT			16
+ #define DEFAULT_BITS_PER_CHAR		10
++#define STALE_COUNT                     (DEFAULT_BITS_PER_CHAR * STALE_TIMEOUT)
+ #define GENI_UART_CONS_PORTS		1
+ #define GENI_UART_PORTS			3
++
++/* Timeout for waiting on completion */
++#define POLL_WAIT_TIMEOUT_MSEC		100
+ #define DEF_FIFO_DEPTH_WORDS		16
+ #define DEF_TX_WM			2
+ #define DEF_FIFO_WIDTH_BITS		32
+@@ -98,11 +105,39 @@
+ 
+ #define DMA_RX_BUF_SIZE		2048
+ 
++/* GSI specific defines */
++#define NUM_RX_BUF                      4
++
++#define QCOM_M_IRQ_BITS        (M_RX_FIFO_WATERMARK_EN | M_RX_FIFO_LAST_EN | \
++				M_CMD_CANCEL_EN | M_CMD_ABORT_EN | \
++				M_IO_DATA_ASSERT_EN)
++#define QCOM_S_IRQ_BITS        (S_RX_FIFO_WATERMARK_EN | S_RX_FIFO_LAST_EN | \
++				S_CMD_CANCEL_EN | S_CMD_ABORT_EN)
++
+ struct qcom_geni_device_data {
+ 	bool console;
+ 	enum geni_se_xfer_mode mode;
+ };
+ 
++struct uart_gsi {
++	struct dma_chan *tx_c;
++	struct dma_chan *rx_c;
++	struct qcom_gpi_tre tx_cfg0_t;
++	struct qcom_gpi_tre rx_cfg0_t;
++	struct qcom_gpi_tre tx_go_t;
++	struct qcom_gpi_tre rx_go_t;
++	struct qcom_gpi_tre tx_t;
++	struct qcom_gpi_tre rx_t[5];
++	dma_addr_t tx_ph;
++	dma_addr_t rx_ph;
++	struct scatterlist tx_sg[5];
++	struct scatterlist rx_sg[6];
++	struct dma_async_tx_descriptor *tx_desc;
++	struct dma_async_tx_descriptor *rx_desc;
++	struct qcom_gpi_dma_async_tx_cb_param tx_cb;
++	struct qcom_gpi_dma_async_tx_cb_param rx_cb;
++};
++
+ struct qcom_geni_private_data {
+ 	/* NOTE: earlycon port will have NULL here */
+ 	struct uart_driver *drv;
+@@ -132,10 +167,28 @@ struct qcom_geni_serial_port {
+ 
+ 	unsigned int tx_remaining;
+ 	unsigned int tx_queued;
++	unsigned int xmit_size;
+ 	int wakeup_irq;
+ 	bool rx_tx_swap;
+ 	bool cts_rts_swap;
+ 
++	/* GSI mode support */
++	bool gsi_mode;
++	struct uart_gsi *gsi;
++	void *rx_gsi_buf[NUM_RX_BUF];
++	dma_addr_t rx_gsi_dma_addr[NUM_RX_BUF];
++	int rx_buf_idx;
++	struct workqueue_struct *tx_wq;
++	struct workqueue_struct *rx_wq;
++	struct work_struct tx_xfer_work;
++	struct work_struct rx_cancel_work;
++	struct work_struct tx_cancel_work;
++	struct completion tx_xfer;
++	struct completion rx_cancel;
++	struct completion xfer;
++	bool gsi_rx_done;
++	bool port_setup;
++	atomic_t stop_rx_inprogress;
+ 	struct qcom_geni_private_data private_data;
+ 	const struct qcom_geni_device_data *dev_data;
+ };
+@@ -153,6 +206,19 @@ static inline struct qcom_geni_serial_port *to_dev_port(struct uart_port *uport)
+ 	return container_of(uport, struct qcom_geni_serial_port, uport);
+ }
+ 
++static void qcom_geni_uart_gsi_tx_cb(void *ptr);
++static void qcom_geni_uart_gsi_rx_cb(void *ptr);
++static void qcom_geni_uart_gsi_xfer_tx(struct work_struct *work);
++static void qcom_geni_uart_gsi_cancel_tx(struct work_struct *work);
++static void qcom_geni_uart_gsi_cancel_rx(struct work_struct *work);
++static int qcom_geni_uart_gsi_xfer_rx(struct uart_port *uport);
++static void qcom_geni_serial_init_gsi(struct uart_port *uport);
++static void setup_config0_tre(struct uart_port *uport, unsigned int bits_per_char,
++			      unsigned int clk_div, unsigned int stop_bit_len,
++			      unsigned int tx_parity, bool cts_mask,
++			      unsigned int rx_parity, unsigned int loopback);
++static int qcom_geni_serial_alloc_gsi_rx_bufs(struct uart_port *uport);
++
+ static struct qcom_geni_serial_port qcom_geni_uart_ports[GENI_UART_PORTS] = {
+ 	[0] = {
+ 		.uport = {
+@@ -247,7 +313,11 @@ static void qcom_geni_serial_set_mctrl(struct uart_port *uport,
+ 		return;
+ 
+ 	if (mctrl & TIOCM_LOOP)
+-		port->loopback = RX_TX_CTS_RTS_SORTED;
++		/* For TX-RX loopback without HW CTRL, set
++		 * loopback to RX_TX. when HW flow control
++		 * is enabled, update loopback to RX_TX_CTS_RTS_SORTED
++		 */
++		port->loopback = RX_TX_SORTED;
+ 
+ 	if (!(mctrl & TIOCM_RTS) && !uport->suspended)
+ 		uart_manual_rfr = UART_MANUAL_RFR_EN | UART_RFR_NOT_READY;
+@@ -425,6 +495,30 @@ static int qcom_geni_serial_poll_init(struct uart_port *uport)
+ }
+ #endif
+ 
++static void qcom_geni_serial_enable_interrupts(struct uart_port *uport)
++{
++	struct qcom_geni_serial_port *port = to_dev_port(uport);
++	u32 geni_m_irq_en, geni_s_irq_en;
++
++	geni_m_irq_en = readl(uport->membase + SE_GENI_M_IRQ_EN);
++	geni_s_irq_en = readl(uport->membase + SE_GENI_S_IRQ_EN);
++
++	/* GSI mode: disable FIFO watermark interrupts */
++	if (port->gsi_mode) {
++		geni_m_irq_en |= QCOM_M_IRQ_BITS;
++		geni_s_irq_en |= QCOM_S_IRQ_BITS;
++		geni_m_irq_en &= ~M_RX_FIFO_WATERMARK_EN;
++		geni_s_irq_en &= ~S_RX_FIFO_WATERMARK_EN;
++	}
++
++	writel(geni_m_irq_en, uport->membase + SE_GENI_M_IRQ_EN);
++	writel(geni_s_irq_en, uport->membase + SE_GENI_S_IRQ_EN);
++
++	dev_info(uport->dev,
++		 "enable_interrupts: M_IRQ_EN=0x%x S_IRQ_EN=0x%x gsi=%d\n",
++		 geni_m_irq_en, geni_s_irq_en, port->gsi_mode);
++}
++
+ #ifdef CONFIG_SERIAL_QCOM_GENI_CONSOLE
+ static void qcom_geni_serial_drain_fifo(struct uart_port *uport)
+ {
+@@ -503,7 +597,7 @@ __qcom_geni_serial_console_write(struct uart_port *uport, const char *s,
+ }
+ 
+ static void qcom_geni_serial_console_write(struct console *co, const char *s,
+-			      unsigned int count)
++			     unsigned int count)
+ {
+ 	struct uart_port *uport;
+ 	struct qcom_geni_serial_port *port;
+@@ -616,6 +710,12 @@ static void qcom_geni_serial_stop_tx_dma(struct uart_port *uport)
+ 	struct qcom_geni_serial_port *port = to_dev_port(uport);
+ 	bool done;
+ 
++	if (port->gsi_mode) {
++		dev_dbg(uport->dev, "stop_tx_dma: queuing GSI TX cancel work\n");
++		queue_work(port->tx_wq, &port->tx_cancel_work);
++		return;
++	}
++
+ 	if (!qcom_geni_serial_main_active(uport))
+ 		return;
+ 
+@@ -649,6 +749,18 @@ static void qcom_geni_serial_start_tx_dma(struct uart_port *uport)
+ 	unsigned int xmit_size;
+ 	int ret;
+ 
++	if (port->gsi_mode) {
++		if (port->gsi->tx_ph) {
++			dev_dbg(uport->dev,
++				"start_tx_dma: GSI TX already in-flight (tx_ph=0x%llx)\n",
++				(unsigned long long)port->gsi->tx_ph);
++			return;
++		}
++		dev_dbg(uport->dev, "start_tx_dma: queuing GSI TX xfer work\n");
++		queue_work(port->tx_wq, &port->tx_xfer_work);
++		return;
++	}
++
+ 	if (port->tx_dma_addr)
+ 		return;
+ 
+@@ -811,6 +923,28 @@ static void qcom_geni_serial_stop_rx_dma(struct uart_port *uport)
+ 	struct qcom_geni_serial_port *port = to_dev_port(uport);
+ 	bool done;
+ 
++	if (port->gsi_mode) {
++		if (!port->port_setup) {
++			dev_dbg(uport->dev, "stop_rx_dma: port not setup, skip\n");
++			return;
++		}
++		if (atomic_read(&port->stop_rx_inprogress)) {
++			dev_dbg(uport->dev, "stop_rx_dma: already in progress, skip\n");
++			return;
++		}
++		if (!qcom_geni_serial_secondary_active(uport)) {
++			dev_dbg(uport->dev,
++				"stop_rx_dma: SE RX not active, complete immediately\n");
++			complete(&port->xfer);
++			return;
++		}
++		atomic_set(&port->stop_rx_inprogress, 1);
++		dev_dbg(uport->dev, "stop_rx_dma: queuing GSI RX cancel work\n");
++		reinit_completion(&port->xfer);
++		queue_work(port->rx_wq, &port->rx_cancel_work);
++		return;
++	}
++
+ 	if (!qcom_geni_serial_secondary_active(uport))
+ 		return;
+ 
+@@ -841,6 +975,29 @@ static void qcom_geni_serial_start_rx_dma(struct uart_port *uport)
+ {
+ 	struct qcom_geni_serial_port *port = to_dev_port(uport);
+ 	int ret;
++	u32 geni_status;
++
++	/* GSI mode: RX sequencer logic */
++	if (port->gsi_mode) {
++		if (!qcom_geni_serial_secondary_active(uport))
++			geni_se_setup_s_cmd(&port->se, UART_START_READ,
++					    UART_PARAM_RFR_OPEN);
++		geni_status = readl(uport->membase + SE_GENI_STATUS);
++
++		if (geni_status & S_GENI_CMD_ACTIVE) {
++			dev_dbg(uport->dev,
++				"start_rx_dma: Sec SE still active (geni_status=0x%x), aborting\n",
++				geni_status);
++			qcom_geni_serial_abort_rx(uport);
++		}
++
++		dev_dbg(uport->dev, "start_rx_dma: starting GSI RX DMA xfer\n");
++		/* Start GSI RX transfer */
++		ret = qcom_geni_uart_gsi_xfer_rx(uport);
++		if (ret)
++			dev_err(uport->dev, "GSI RX xfer failed: %d\n", ret);
++		return;
++	}
+ 
+ 	if (qcom_geni_serial_secondary_active(uport))
+ 		qcom_geni_serial_stop_rx_dma(uport);
+@@ -899,6 +1056,503 @@ static void qcom_geni_serial_stop_rx(struct uart_port *uport)
+ 	uport->ops->stop_rx(uport);
+ }
+ 
++/**
++ * setup_config0_tre() - Configure GSI TRE for UART parameters
++ * From qcom_geni_serial.c lines 1877-1905
++ */
++static void setup_config0_tre(struct uart_port *uport, unsigned int bits_per_char,
++			      unsigned int clk_div, unsigned int stop_bit_len,
++			      unsigned int tx_parity, bool cts_mask,
++			      unsigned int rx_parity, unsigned int loopback)
++{
++	struct qcom_geni_serial_port *port = to_dev_port(uport);
++	struct qcom_gpi_tre *tx_cfg0 = &port->gsi->tx_cfg0_t;
++	struct qcom_gpi_tre *rx_cfg0 = &port->gsi->rx_cfg0_t;
++	unsigned int char_size = bits_per_char - 5;
++	unsigned int flags = (cts_mask << 2) | (loopback & 0x1);
++	unsigned int rfr_lvl = port->rx_fifo_depth - 2;
++
++	/* TX config0: Parity-4 for none, packing-101 */
++	tx_cfg0->dword[0] = QCOM_GPI_UART_CONFIG0_TRE_DWORD0(1, 0, flags, 4,
++							     stop_bit_len, char_size);
++	tx_cfg0->dword[1] = QCOM_GPI_UART_CONFIG0_TRE_DWORD1(0, 0);
++	tx_cfg0->dword[2] = QCOM_GPI_UART_CONFIG0_TRE_DWORD2(0, clk_div);
++	tx_cfg0->dword[3] = QCOM_GPI_UART_CONFIG0_TRE_DWORD3(0, 0, 0, 0, 1);
++
++	/* RX config0 */
++	rx_cfg0->dword[0] = QCOM_GPI_UART_CONFIG0_TRE_DWORD0(1, 0, flags, 4,
++							     stop_bit_len, char_size);
++	rx_cfg0->dword[1] = QCOM_GPI_UART_CONFIG0_TRE_DWORD1(rfr_lvl, STALE_COUNT);
++	rx_cfg0->dword[2] = QCOM_GPI_UART_CONFIG0_TRE_DWORD2(0, clk_div);
++	rx_cfg0->dword[3] = QCOM_GPI_UART_CONFIG0_TRE_DWORD3(0, 0, 0, 0, 1);
++
++	/* Set callback userdata */
++	port->gsi->tx_cb.userdata = port;
++	port->gsi->rx_cb.userdata = port;
++
++	dev_dbg(uport->dev,
++		"config0_tre: bpc=%u clk_div=%u sbl=%u flags=0x%x rfr_lvl=%u stale=%u\n",
++		bits_per_char, clk_div, stop_bit_len, flags, rfr_lvl, STALE_COUNT);
++	dev_dbg(uport->dev,
++		"config0_tre: TX dw[0]=0x%08x dw[1]=0x%08x dw[2]=0x%08x dw[3]=0x%08x\n",
++		tx_cfg0->dword[0], tx_cfg0->dword[1],
++		tx_cfg0->dword[2], tx_cfg0->dword[3]);
++	dev_dbg(uport->dev,
++		"config0_tre: RX dw[0]=0x%08x dw[1]=0x%08x dw[2]=0x%08x dw[3]=0x%08x\n",
++		rx_cfg0->dword[0], rx_cfg0->dword[1],
++		rx_cfg0->dword[2], rx_cfg0->dword[3]);
++}
++
++/**
++ * qcom_geni_serial_alloc_gsi_rx_bufs() - Allocate RX buffers for GSI mode
++ */
++static int qcom_geni_serial_alloc_gsi_rx_bufs(struct uart_port *uport)
++{
++	struct qcom_geni_serial_port *port = to_dev_port(uport);
++	struct device *gpi_dev = port->gsi->rx_c->device->dev;
++	int i;
++
++	for (i = 0; i < NUM_RX_BUF; i++) {
++		port->rx_gsi_buf[i] = dma_alloc_coherent(gpi_dev,
++							 DMA_RX_BUF_SIZE,
++							 &port->rx_gsi_dma_addr[i],
++							 GFP_KERNEL);
++		if (!port->rx_gsi_buf[i])
++			goto free_bufs;
++		dev_dbg(uport->dev,
++			"alloc_rx_bufs: buf[%d] virt=%p dma=0x%llx\n",
++			i, port->rx_gsi_buf[i],
++			(u64)port->rx_gsi_dma_addr[i]);
++	}
++	return 0;
++
++free_bufs:
++	for (i = 0; i < NUM_RX_BUF; i++) {
++		if (port->rx_gsi_buf[i]) {
++			dma_free_coherent(gpi_dev, DMA_RX_BUF_SIZE,
++					  port->rx_gsi_buf[i],
++					  port->rx_gsi_dma_addr[i]);
++			port->rx_gsi_buf[i] = NULL;
++			port->rx_gsi_dma_addr[i] = 0;
++		}
++	}
++	return -ENOMEM;
++}
++
++/**
++ * qcom_geni_uart_gsi_tx_cb() - TX DMA completion callback
++ */
++static void qcom_geni_uart_gsi_tx_cb(void *ptr)
++{
++	struct qcom_gpi_dma_async_tx_cb_param *tx_cb = ptr;
++	struct qcom_geni_serial_port *port = tx_cb->userdata;
++	struct uart_port *uport = &port->uport;
++	struct circ_buf *xmit = &uport->state->xmit;
++
++	xmit->tail = (xmit->tail + port->xmit_size) & (UART_XMIT_SIZE - 1);
++	dma_unmap_single(port->gsi->tx_c->device->dev,
++			 port->gsi->tx_ph, port->xmit_size, DMA_TO_DEVICE);
++	uport->icount.tx += port->xmit_size;
++	dev_info(uport->dev, "gsi_tx_cb: TX complete %u bytes sent\n",
++		 port->xmit_size);
++	port->gsi->tx_ph = (dma_addr_t)NULL;
++	port->xmit_size = 0;
++	complete(&port->tx_xfer);
++
++	if (!uart_circ_empty(xmit))
++		queue_work(port->tx_wq, &port->tx_xfer_work);
++	else
++		uart_write_wakeup(uport);
++}
++
++static void qcom_geni_uart_rx_queue_dma_tre(int index, struct uart_port *uport)
++{
++	struct qcom_geni_serial_port *port = to_dev_port(uport);
++	struct dma_async_tx_descriptor *desc;
++	struct scatterlist rx_sg;
++	dma_cookie_t rx_cookie;
++
++	/* Initialize single-element scatter-gather list */
++	sg_init_table(&rx_sg, 1);
++	sg_set_buf(&rx_sg, &port->gsi->rx_t[index],
++		   sizeof(port->gsi->rx_t[index]));
++
++	/* Prepare RX descriptor with single DATA TRE */
++	desc = dmaengine_prep_slave_sg(port->gsi->rx_c,
++				       &rx_sg, 1, DMA_DEV_TO_MEM,
++				       (DMA_PREP_INTERRUPT | DMA_CTRL_ACK));
++	if (!desc) {
++		dev_err(uport->dev, "%s: Prep_slave_sg failed\n", __func__);
++		return;
++	}
++
++	/* Set callback for completion */
++	desc->callback = qcom_geni_uart_gsi_rx_cb;
++	desc->callback_param = &port->gsi->rx_cb;
++
++	/* Submit descriptor */
++	rx_cookie = dmaengine_submit(desc);
++	if (dma_submit_error(rx_cookie)) {
++		dev_err(uport->dev, "%s: dmaengine_submit failed (%d)\n",
++			__func__, rx_cookie);
++		dmaengine_terminate_all(port->gsi->rx_c);
++		return;
++	}
++
++	/* Issue pending DMA */
++	dma_async_issue_pending(port->gsi->rx_c);
++}
++
++/**
++ * qcom_geni_uart_gsi_rx_cb() - RX DMA completion callback
++ */
++static void qcom_geni_uart_gsi_rx_cb(void *ptr)
++{
++	struct qcom_gpi_dma_async_tx_cb_param *rx_cb = ptr;
++	struct qcom_geni_serial_port *port = rx_cb->userdata;
++	struct uart_port *uport = &port->uport;
++	struct tty_port *tport = &uport->state->port;
++	unsigned int rx_bytes = rx_cb->length;
++	int ret;
++
++	dev_info(uport->dev,
++		 "gsi_rx_cb: RX complete: received %u bytes\n", rx_bytes);
++
++	if (rx_bytes) {
++		ret = tty_insert_flip_string(tport,
++					     (unsigned char *)(port->rx_gsi_buf[port->rx_buf_idx]),
++					     rx_bytes);
++		if (ret != rx_bytes) {
++			dev_warn(uport->dev, "RX: inserted %d of %d bytes\n",
++				 ret, rx_bytes);
++		}
++
++		/* Update RX counter */
++		uport->icount.rx += ret;
++	}
++
++	/* Push data to TTY layer */
++	tty_flip_buffer_push(tport);
++	dev_dbg(uport->dev,
++		"gsi_rx_cb: pushed %u bytes to TTY (total rx=%u)\n",
++		rx_bytes, uport->icount.rx);
++
++	if (!port->loopback)
++		/* Queue next RX transfer with current buffer */
++		qcom_geni_uart_rx_queue_dma_tre(port->rx_buf_idx, uport);
++	else
++		dev_dbg(uport->dev,
++			"gsi_rx_cb: loopback mode, skip queuing next RX TRE\n");
++
++	/* Update buffer index for next transfer (circular buffer) */
++	port->rx_buf_idx = (port->rx_buf_idx + 1) % NUM_RX_BUF;
++}
++
++/**
++ * qcom_geni_uart_gsi_xfer_tx() - TX transfer work function
++ */
++static void qcom_geni_uart_gsi_xfer_tx(struct work_struct *work)
++{
++	struct qcom_geni_serial_port *port = container_of(work,
++			struct qcom_geni_serial_port,
++			tx_xfer_work);
++	struct uart_port *uport = &port->uport;
++	struct circ_buf *xmit = &uport->state->xmit;
++	struct qcom_gpi_tre *go_t = &port->gsi->tx_go_t;
++	struct dma_async_tx_descriptor *desc;
++	dma_cookie_t cookie;
++	int ret, xmit_size, index = 0;
++
++	if (uart_circ_empty(xmit) || uart_tx_stopped(uport)) {
++		dev_dbg(uport->dev, "gsi_xfer_tx: circ empty or TX stopped, skip\n");
++		complete(&port->tx_xfer);
++		return;
++	}
++
++	xmit_size = uart_circ_chars_pending(xmit);
++	if (xmit_size > (UART_XMIT_SIZE - xmit->tail))
++		xmit_size = UART_XMIT_SIZE - xmit->tail;
++
++	dev_dbg(uport->dev, "gsi_xfer_tx: submitting %d bytes (tail=%d)\n",
++		xmit_size, xmit->tail);
++
++	sg_init_table(port->gsi->tx_sg, 3);
++	sg_set_buf(&port->gsi->tx_sg[index++], &port->gsi->tx_cfg0_t,
++		   sizeof(port->gsi->tx_cfg0_t));
++
++	go_t->dword[0] = QCOM_GPI_UART_GO_TRE_DWORD0(0, 1);
++	go_t->dword[1] = QCOM_GPI_UART_GO_TRE_DWORD1;
++	go_t->dword[2] = QCOM_GPI_UART_GO_TRE_DWORD2;
++	go_t->dword[3] = QCOM_GPI_UART_GO_TRE_DWORD3(0, 0, 0, 0, 1);
++	sg_set_buf(&port->gsi->tx_sg[index++], go_t, sizeof(*go_t));
++
++	port->xmit_size = xmit_size;
++	port->gsi->tx_ph = dma_map_single(port->gsi->tx_c->device->dev,
++					  &xmit->buf[xmit->tail],
++					  xmit_size, DMA_TO_DEVICE);
++	if (dma_mapping_error(port->gsi->tx_c->device->dev, port->gsi->tx_ph)) {
++		dev_err(uport->dev, "TX DMA map error\n");
++		port->gsi->tx_ph = (dma_addr_t)NULL;
++		complete(&port->tx_xfer);
++		return;
++	}
++
++	port->gsi->tx_t.dword[0] = QCOM_GPI_DMA_W_BUFFER_TRE_DWORD0(port->gsi->tx_ph);
++	port->gsi->tx_t.dword[1] = QCOM_GPI_DMA_W_BUFFER_TRE_DWORD1(port->gsi->tx_ph);
++	port->gsi->tx_t.dword[2] = QCOM_GPI_DMA_W_BUFFER_TRE_DWORD2(xmit_size);
++	port->gsi->tx_t.dword[3] = QCOM_GPI_DMA_W_BUFFER_TRE_DWORD3(0, 0, 1, 0, 0);
++
++	sg_set_buf(&port->gsi->tx_sg[index++], &port->gsi->tx_t,
++		   sizeof(port->gsi->tx_t));
++
++	desc = dmaengine_prep_slave_sg(port->gsi->tx_c,
++				       port->gsi->tx_sg, 3,
++				       DMA_MEM_TO_DEV,
++				       DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
++	if (!desc) {
++		dev_err(uport->dev, "TX prep failed\n");
++		goto unmap_tx;
++	}
++
++	desc->callback = qcom_geni_uart_gsi_tx_cb;
++	desc->callback_param = &port->gsi->tx_cb;
++
++	cookie = dmaengine_submit(desc);
++	ret = dma_submit_error(cookie);
++	if (ret) {
++		dev_err(uport->dev, "TX submit failed: %d\n", ret);
++		goto unmap_tx;
++	}
++
++	dma_async_issue_pending(port->gsi->tx_c);
++	dev_dbg(uport->dev,
++		"gsi_xfer_tx: TX issued %d bytes (tail=%d ph=0x%llx)\n"
++		"  CONFIG0 dw[0]=0x%08x dw[1]=0x%08x dw[2]=0x%08x dw[3]=0x%08x\n"
++		"  GO      dw[0]=0x%08x dw[1]=0x%08x dw[2]=0x%08x dw[3]=0x%08x\n"
++		"  DATA    dw[0]=0x%08x dw[1]=0x%08x dw[2]=0x%08x dw[3]=0x%08x\n"
++		"  data[0..15]= %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
++		xmit_size, xmit->tail, (u64)port->gsi->tx_ph,
++		port->gsi->tx_cfg0_t.dword[0], port->gsi->tx_cfg0_t.dword[1],
++		port->gsi->tx_cfg0_t.dword[2], port->gsi->tx_cfg0_t.dword[3],
++		go_t->dword[0], go_t->dword[1], go_t->dword[2], go_t->dword[3],
++		port->gsi->tx_t.dword[0], port->gsi->tx_t.dword[1],
++		port->gsi->tx_t.dword[2], port->gsi->tx_t.dword[3],
++		((u8 *)&xmit->buf[xmit->tail])[0],
++		((u8 *)&xmit->buf[xmit->tail])[1],
++		((u8 *)&xmit->buf[xmit->tail])[2],
++		((u8 *)&xmit->buf[xmit->tail])[3],
++		((u8 *)&xmit->buf[xmit->tail])[4],
++		((u8 *)&xmit->buf[xmit->tail])[5],
++		((u8 *)&xmit->buf[xmit->tail])[6],
++		((u8 *)&xmit->buf[xmit->tail])[7],
++		((u8 *)&xmit->buf[xmit->tail])[8],
++		((u8 *)&xmit->buf[xmit->tail])[9],
++		((u8 *)&xmit->buf[xmit->tail])[10],
++		((u8 *)&xmit->buf[xmit->tail])[11],
++		((u8 *)&xmit->buf[xmit->tail])[12],
++		((u8 *)&xmit->buf[xmit->tail])[13],
++		((u8 *)&xmit->buf[xmit->tail])[14],
++		((u8 *)&xmit->buf[xmit->tail])[15]);
++
++	reinit_completion(&port->tx_xfer);
++	if (!wait_for_completion_timeout(&port->tx_xfer,
++					 msecs_to_jiffies(POLL_WAIT_TIMEOUT_MSEC)))
++		dev_warn(uport->dev, "gsi_xfer_tx: TX completion timeout\n");
++	return;
++
++unmap_tx:
++	geni_se_tx_dma_unprep(&port->se, port->gsi->tx_ph, xmit_size);
++	port->gsi->tx_ph = (dma_addr_t)NULL;
++	complete(&port->tx_xfer);
++}
++
++static void qcom_geni_uart_gsi_cancel_tx(struct work_struct *work)
++{
++	struct qcom_geni_serial_port *port = container_of(work,
++			struct qcom_geni_serial_port,
++			tx_cancel_work);
++	struct uart_port *uport = &port->uport;
++
++	if (port->gsi->tx_ph) {
++		dev_dbg(uport->dev,
++			"gsi_cancel_tx: unmapping in-flight TX buffer (ph=0x%llx size=%u)\n",
++			(unsigned long long)port->gsi->tx_ph, port->xmit_size);
++		if (port->gsi->tx_c)
++			dma_unmap_single(port->gsi->tx_c->device->dev, port->gsi->tx_ph,
++					 port->xmit_size, DMA_TO_DEVICE);
++		port->gsi->tx_ph = (dma_addr_t)NULL;
++		port->xmit_size = 0;
++	}
++	dev_dbg(uport->dev, "gsi_cancel_tx: terminating TX DMA\n");
++	if (port->gsi->tx_c)
++		dmaengine_terminate_all(port->gsi->tx_c);
++	complete(&port->tx_xfer);
++}
++
++static void qcom_geni_uart_gsi_cancel_rx(struct work_struct *work)
++{
++	struct qcom_geni_serial_port *port = container_of(work,
++			struct qcom_geni_serial_port,
++			rx_cancel_work);
++	dev_dbg(port->uport.dev, "gsi_cancel_rx: terminating RX DMA\n");
++	dmaengine_terminate_all(port->gsi->rx_c);
++	complete(&port->rx_cancel);
++	complete(&port->xfer);
++	atomic_set(&port->stop_rx_inprogress, 0);
++	dev_dbg(port->uport.dev, "gsi_cancel_rx: done\n");
++}
++
++static int qcom_geni_uart_gsi_xfer_rx(struct uart_port *uport)
++{
++	struct qcom_geni_serial_port *port = to_dev_port(uport);
++	struct qcom_gpi_tre *go_t = &port->gsi->rx_go_t;
++	struct dma_async_tx_descriptor *desc;
++	dma_cookie_t cookie;
++	int i, index = 0, ret = 0;
++
++	if (!port->port_setup) {
++		dev_err(uport->dev, "%s: Port setup not yet done\n", __func__);
++		return -EINVAL;
++	}
++
++	if (!port->gsi->rx_c || !port->gsi->tx_c) {
++		dev_err(uport->dev, "%s: GSI channels not allocated\n", __func__);
++		return -EINVAL;
++	}
++
++	for (i = 0; i < NUM_RX_BUF; i++) {
++		if (!port->rx_gsi_buf[i] || !port->rx_gsi_dma_addr[i]) {
++			dev_err(uport->dev, "%s: RX buffer %d not initialized\n",
++				__func__, i);
++			return -EINVAL;
++		}
++	}
++
++	port->rx_buf_idx = 0;
++	/* Build scatterlist: CONFIG0 TRE + GO TRE + NUM_RX_BUF DATA TREs */
++	sg_init_table(port->gsi->rx_sg, 6);
++
++	sg_set_buf(&port->gsi->rx_sg[index++], &port->gsi->rx_cfg0_t,
++		   sizeof(port->gsi->rx_cfg0_t));
++
++	go_t->dword[0] = QCOM_GPI_UART_GO_TRE_DWORD0(0, 1);
++	go_t->dword[1] = QCOM_GPI_UART_GO_TRE_DWORD1;
++	go_t->dword[2] = QCOM_GPI_UART_GO_TRE_DWORD2;
++	go_t->dword[3] = QCOM_GPI_UART_GO_TRE_DWORD3(0, 0, 0, 0, 1);
++	sg_set_buf(&port->gsi->rx_sg[index++], go_t, sizeof(port->gsi->rx_go_t));
++
++	for (i = 0; i < NUM_RX_BUF; i++) {
++		port->gsi->rx_t[i].dword[0] =
++			QCOM_GPI_DMA_W_BUFFER_TRE_DWORD0(port->rx_gsi_dma_addr[i]);
++		port->gsi->rx_t[i].dword[1] =
++			QCOM_GPI_DMA_W_BUFFER_TRE_DWORD1(port->rx_gsi_dma_addr[i]);
++		port->gsi->rx_t[i].dword[2] =
++			QCOM_GPI_DMA_W_BUFFER_TRE_DWORD2(DMA_RX_BUF_SIZE);
++		/*
++		 * Intermediate TREs (not last): ch=1 chains to the next TRE.
++		 * Last TRE: ch=0 terminates the chain so the GPI ring processor
++		 * does not read past the end of the submitted descriptor.
++		 * Only the last TRE asserts IEOT+IEOB to signal completion.
++		 */
++		if (i < NUM_RX_BUF - 1)
++			port->gsi->rx_t[i].dword[3] =
++				QCOM_GPI_DMA_W_BUFFER_TRE_DWORD3(0, 0, 0, 0, 1);
++		else
++			port->gsi->rx_t[i].dword[3] =
++				QCOM_GPI_DMA_W_BUFFER_TRE_DWORD3(0, 0, 1, 1, 0);
++		sg_set_buf(&port->gsi->rx_sg[index++], &port->gsi->rx_t[i],
++			   sizeof(port->gsi->rx_t[i]));
++		dev_dbg(uport->dev,
++			"gsi_xfer_rx: DATA TRE[%d] dma=0x%llx dw[0]=0x%08x dw[3]=0x%08x\n",
++			i, (u64)port->rx_gsi_dma_addr[i],
++			port->gsi->rx_t[i].dword[0],
++			port->gsi->rx_t[i].dword[3]);
++	}
++
++	dev_info(uport->dev,
++		 "gsi_xfer_rx: submitting 6 TREs (cfg0+go+4xdata) to RX channel\n");
++	desc = dmaengine_prep_slave_sg(port->gsi->rx_c, port->gsi->rx_sg, 6,
++				       DMA_DEV_TO_MEM,
++				       DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
++	if (!desc) {
++		dev_err(uport->dev, "%s: RX descriptor preparation failed\n", __func__);
++		ret = -EIO;
++		goto exit_gsi_xfer_rx;
++	}
++
++	desc->callback = qcom_geni_uart_gsi_rx_cb;
++	desc->callback_param = &port->gsi->rx_cb;
++	port->gsi->rx_desc = desc;
++
++	cookie = dmaengine_submit(desc);
++	if (dma_submit_error(cookie)) {
++		dev_err(uport->dev, "%s: DMA submit failed (%d)\n", __func__, cookie);
++		ret = -EINVAL;
++		goto exit_gsi_xfer_rx;
++	}
++
++	dma_async_issue_pending(port->gsi->rx_c);
++	dev_dbg(uport->dev, "gsi_xfer_rx: RX transfer started (6 TREs: cfg0+go+4xdata)\n");
++	return 0;
++
++exit_gsi_xfer_rx:
++	dmaengine_terminate_sync(port->gsi->rx_c);
++	return ret;
++}
++
++static void qcom_geni_serial_init_gsi(struct uart_port *uport)
++{
++	struct qcom_geni_serial_port *port = to_dev_port(uport);
++
++	dev_dbg(uport->dev, "init_gsi: mode=%d (GPI_DMA=%d)\n",
++		port->dev_data->mode, GENI_GPI_DMA);
++
++	if (port->dev_data->mode != GENI_GPI_DMA) {
++		dev_dbg(uport->dev, "init_gsi: not GPI_DMA mode, skipping GSI init\n");
++		return;
++	}
++
++	port->gsi_mode = true;
++	uport->ops = &qcom_geni_uart_pops;
++	dev_dbg(uport->dev, "init_gsi: gsi_mode set, ops switched to uart_pops\n");
++	port->gsi = devm_kzalloc(uport->dev, sizeof(*port->gsi), GFP_KERNEL);
++	if (!port->gsi) {
++		dev_err(uport->dev, "Failed to allocate GSI structure\n");
++		port->gsi_mode = false;
++		return;
++	}
++
++	port->tx_wq = alloc_workqueue("%s_tx", WQ_UNBOUND | WQ_HIGHPRI, 1,
++				      dev_name(uport->dev));
++	port->rx_wq = alloc_workqueue("%s_rx", WQ_UNBOUND | WQ_HIGHPRI, 1,
++				      dev_name(uport->dev));
++	if (!port->tx_wq || !port->rx_wq) {
++		dev_err(uport->dev, "Failed to create workqueues\n");
++		goto cleanup_wq;
++	}
++
++	INIT_WORK(&port->tx_xfer_work, qcom_geni_uart_gsi_xfer_tx);
++	INIT_WORK(&port->rx_cancel_work, qcom_geni_uart_gsi_cancel_rx);
++	INIT_WORK(&port->tx_cancel_work, qcom_geni_uart_gsi_cancel_tx);
++
++	init_completion(&port->tx_xfer);
++	init_completion(&port->rx_cancel);
++	init_completion(&port->xfer);
++	complete(&port->xfer);
++
++	dev_info(uport->dev, "GSI mode initialized successfully\n");
++	return;
++
++cleanup_wq:
++	if (port->tx_wq)
++		destroy_workqueue(port->tx_wq);
++	if (port->rx_wq)
++		destroy_workqueue(port->rx_wq);
++	devm_kfree(uport->dev, port->gsi);
++	port->gsi = NULL;
++	port->gsi_mode = false;
++}
++
+ static void qcom_geni_serial_stop_tx(struct uart_port *uport)
+ {
+ 	uport->ops->stop_tx(uport);
+@@ -1130,8 +1784,89 @@ static int setup_fifos(struct qcom_geni_serial_port *port)
+ 
+ static void qcom_geni_serial_shutdown(struct uart_port *uport)
+ {
++	struct qcom_geni_serial_port *port = to_dev_port(uport);
++	int i, timeout;
++
+ 	disable_irq(uport->irq);
+ 
++	if (port->gsi_mode) {
++		dev_dbg(uport->dev, "shutdown: GSI cleanup start\n");
++		/*
++		 * Wait for RX channel reset completion before cleanup.
++		 * The framework calls stop_rx_sequencer before closing,
++		 * but in atomic context we can't use wait_for_completion_timeout.
++		 * So we wait here during shutdown.
++		 */
++		timeout = wait_for_completion_timeout(&port->xfer,
++						      msecs_to_jiffies(POLL_WAIT_TIMEOUT_MSEC));
++		if (!timeout)
++			dev_warn(uport->dev, "%s: Timeout waiting for Rx reset\n", __func__);
++		cancel_work_sync(&port->tx_xfer_work);
++		cancel_work_sync(&port->rx_cancel_work);
++		cancel_work_sync(&port->tx_cancel_work);
++		/* Cleanup RX channel and buffers */
++		if (port->gsi->rx_c) {
++			dev_dbg(uport->dev, "shutdown: releasing GSI RX channel\n");
++
++			/* Terminate any ongoing RX transfers */
++			dmaengine_terminate_sync(port->gsi->rx_c);
++
++			/* Release RX channel */
++			dma_release_channel(port->gsi->rx_c);
++
++			/* Flush RX workqueue to ensure no pending work */
++			if (port->rx_wq)
++				flush_workqueue(port->rx_wq);
++
++			/* Free all RX buffers */
++			for (i = 0; i < NUM_RX_BUF; i++) {
++				if (port->rx_gsi_buf[i]) {
++					dma_free_coherent(port->gsi->rx_c->device->dev,
++							  DMA_RX_BUF_SIZE,
++							  port->rx_gsi_buf[i],
++							  port->rx_gsi_dma_addr[i]);
++					port->rx_gsi_buf[i] = NULL;
++					port->rx_gsi_dma_addr[i] = 0;
++				}
++			}
++
++			port->gsi->rx_c = NULL;
++			dev_dbg(uport->dev, "shutdown: GSI RX channel released\n");
++		}
++
++		/* Cleanup TX channel */
++		if (port->gsi->tx_c) {
++			dev_dbg(uport->dev, "shutdown: releasing GSI TX channel\n");
++
++			/* Terminate any ongoing TX transfers */
++			dmaengine_terminate_sync(port->gsi->tx_c);
++
++			/* Release TX channel */
++			dma_release_channel(port->gsi->tx_c);
++
++			/* Flush TX workqueue to ensure no pending work */
++			if (port->tx_wq)
++				flush_workqueue(port->tx_wq);
++
++			/* Unmap TX buffer if it was mapped */
++			if (port->gsi->tx_ph) {
++				dma_unmap_single(port->gsi->tx_c->device->dev,
++						 port->gsi->tx_ph,
++						 port->tx_remaining,
++						 DMA_TO_DEVICE);
++				port->gsi->tx_ph = 0;
++			}
++
++			port->gsi->tx_c = NULL;
++			dev_dbg(uport->dev, "shutdown: GSI TX channel released\n");
++		}
++
++		/* Mark port as not setup; force port_setup() on next open */
++		port->port_setup = false;
++		port->setup = false;
++		dev_dbg(uport->dev, "shutdown: GSI cleanup done\n");
++	}
++
+ 	uart_port_lock_irq(uport);
+ 	qcom_geni_serial_stop_tx(uport);
+ 	qcom_geni_serial_stop_rx(uport);
+@@ -1148,7 +1883,7 @@ static void qcom_geni_serial_flush_buffer(struct uart_port *uport)
+ static int qcom_geni_serial_port_setup(struct uart_port *uport)
+ {
+ 	struct qcom_geni_serial_port *port = to_dev_port(uport);
+-	u32 rxstale = DEFAULT_BITS_PER_CHAR * STALE_TIMEOUT;
++	u32 rxstale = STALE_COUNT;
+ 	u32 proto;
+ 	u32 pin_swap;
+ 	int ret;
+@@ -1186,11 +1921,17 @@ static int qcom_geni_serial_port_setup(struct uart_port *uport)
+ 	 */
+ 	if (uart_console(uport))
+ 		qcom_geni_serial_poll_tx_done(uport);
+-	geni_se_config_packing(&port->se, BITS_PER_BYTE, BYTES_PER_FIFO_WORD,
+-			       false, true, true);
++
++	/* In GSI mode packing is handled by the CONFIG0 TRE */
++	if (!port->gsi_mode)
++		geni_se_config_packing(&port->se, BITS_PER_BYTE, BYTES_PER_FIFO_WORD,
++				       false, true, true);
+ 	geni_se_init(&port->se, UART_RX_WM, port->rx_fifo_depth - 2);
++
+ 	geni_se_select_mode(&port->se, port->dev_data->mode);
+ 	port->setup = true;
++	dev_dbg(uport->dev, "port_setup: done gsi_mode=%d se_mode=%d\n",
++		port->gsi_mode, port->dev_data->mode);
+ 
+ 	return 0;
+ }
+@@ -1206,8 +1947,68 @@ static int qcom_geni_serial_startup(struct uart_port *uport)
+ 			return ret;
+ 	}
+ 
++	if (port->gsi_mode) {
++		dev_dbg(uport->dev, "startup: GSI mode — requesting DMA channels\n");
++		if (!port->gsi->tx_c) {
++			port->gsi->tx_c = dma_request_chan(uport->dev, "tx");
++			if (IS_ERR(port->gsi->tx_c)) {
++				ret = PTR_ERR(port->gsi->tx_c);
++				dev_err(uport->dev,
++					"Failed to request TX channel: %d\n", ret);
++				port->gsi->tx_c = NULL;
++				return ret;
++			}
++			dev_dbg(uport->dev, "startup: TX DMA channel acquired\n");
++		}
++
++		/*
++		 * RX channel: always released in shutdown() (TTY-side only).
++		 * Re-request it here whenever it is NULL.
++		 */
++		if (!port->gsi->rx_c) {
++			port->gsi->rx_c = dma_request_chan(uport->dev, "rx");
++			if (IS_ERR(port->gsi->rx_c)) {
++				ret = PTR_ERR(port->gsi->rx_c);
++				dev_err(uport->dev,
++					"Failed to request RX channel: %d\n", ret);
++				port->gsi->rx_c = NULL;
++				if (!uart_console(&port->uport)) {
++					dma_release_channel(port->gsi->tx_c);
++					port->gsi->tx_c = NULL;
++				}
++				return ret;
++			}
++			dev_dbg(uport->dev, "startup: RX DMA channel acquired\n");
++		}
++		ret = qcom_geni_serial_alloc_gsi_rx_bufs(uport);
++		if (ret) {
++			dev_err(uport->dev, "Failed to allocate RX buffers: %d\n", ret);
++			dma_release_channel(port->gsi->rx_c);
++			port->gsi->rx_c = NULL;
++			if (!uart_console(&port->uport)) {
++				dma_release_channel(port->gsi->tx_c);
++				port->gsi->tx_c = NULL;
++			}
++			return ret;
++		}
++
++		port->port_setup = true;
++		qcom_geni_serial_enable_interrupts(uport);
++		dev_dbg(uport->dev, "startup: GSI RX buffers ready (4 x %d bytes)\n",
++			DMA_RX_BUF_SIZE);
++	}
++
+ 	uart_port_lock_irq(uport);
+-	qcom_geni_serial_start_rx(uport);
++	/*
++	 * For GSI mode, rx_cfg0_t is populated by setup_config0_tre() which
++	 * is called from set_termios().  Submitting a 6-TRE RX chain here
++	 * before set_termios() means the CONFIG0 TRE is all-zeros
++	 * (uninitialised), causing a GPI bus error (glob_err 0x86010) that
++	 * permanently breaks the RX channel.
++	 * RX is started from set_termios() once rx_cfg0_t is properly filled.
++	 */
++	if (!port->gsi_mode)
++		qcom_geni_serial_start_rx(uport);
+ 	uart_port_unlock_irq(uport);
+ 
+ 	enable_irq(uport->irq);
+@@ -1389,18 +2190,49 @@ static void qcom_geni_serial_set_termios(struct uart_port *uport,
+ 		WRITE_ONCE(port->poll_timeout_us, timeout);
+ 	}
+ 
+-	if (!uart_console(uport))
+-		writel(port->loopback,
+-				uport->membase + SE_UART_LOOPBACK_CFG);
+-	writel(tx_trans_cfg, uport->membase + SE_UART_TX_TRANS_CFG);
+-	writel(tx_parity_cfg, uport->membase + SE_UART_TX_PARITY_CFG);
+-	writel(rx_trans_cfg, uport->membase + SE_UART_RX_TRANS_CFG);
+-	writel(rx_parity_cfg, uport->membase + SE_UART_RX_PARITY_CFG);
+-	writel(bits_per_char, uport->membase + SE_UART_TX_WORD_LEN);
+-	writel(bits_per_char, uport->membase + SE_UART_RX_WORD_LEN);
+-	writel(stop_bit_len, uport->membase + SE_UART_TX_STOP_BIT_LEN);
+-	writel(ser_clk_cfg, uport->membase + GENI_SER_M_CLK_CFG);
+-	writel(ser_clk_cfg, uport->membase + GENI_SER_S_CLK_CFG);
++	if (port->gsi_mode) {
++		if (port->port_setup) {
++			dev_dbg(uport->dev,
++				"set_termios: GSI — stopping RX for reconfiguration\n");
++			if (port->tx_wq)
++				flush_workqueue(port->tx_wq);
++			if (port->rx_wq)
++				flush_workqueue(port->rx_wq);
++			reinit_completion(&port->xfer);
++			qcom_geni_serial_stop_rx(uport);
++			if (!wait_for_completion_timeout(&port->xfer,
++							 msecs_to_jiffies(2000)))
++				dev_warn(uport->dev,
++					 "set_termios: GSI stop_rx timeout\n");
++		}
++		setup_config0_tre(uport, bits_per_char, clk_div, stop_bit_len,
++				  tx_parity_cfg, !(tx_trans_cfg & UART_CTS_MASK),
++				  rx_parity_cfg, port->loopback);
++		writel(port->loopback, uport->membase + SE_UART_LOOPBACK_CFG);
++		writel(ser_clk_cfg, uport->membase + GENI_SER_M_CLK_CFG);
++		writel(ser_clk_cfg, uport->membase + GENI_SER_S_CLK_CFG);
++		dev_dbg(uport->dev,
++			"set_termios: GSI baud=%u clk_div=%u loopback=%u clk_cfg=0x%x\n",
++			baud, clk_div, port->loopback, ser_clk_cfg);
++		/* Restart RX with new config */
++		if (port->port_setup) {
++			dev_dbg(uport->dev, "set_termios: GSI — restarting RX\n");
++			qcom_geni_serial_start_rx(uport);
++		}
++	} else {
++		if (!uart_console(uport))
++			writel(port->loopback,
++			       uport->membase + SE_UART_LOOPBACK_CFG);
++		writel(tx_trans_cfg, uport->membase + SE_UART_TX_TRANS_CFG);
++		writel(tx_parity_cfg, uport->membase + SE_UART_TX_PARITY_CFG);
++		writel(rx_trans_cfg, uport->membase + SE_UART_RX_TRANS_CFG);
++		writel(rx_parity_cfg, uport->membase + SE_UART_RX_PARITY_CFG);
++		writel(bits_per_char, uport->membase + SE_UART_TX_WORD_LEN);
++		writel(bits_per_char, uport->membase + SE_UART_RX_WORD_LEN);
++		writel(stop_bit_len, uport->membase + SE_UART_TX_STOP_BIT_LEN);
++		writel(ser_clk_cfg, uport->membase + GENI_SER_M_CLK_CFG);
++		writel(ser_clk_cfg, uport->membase + GENI_SER_S_CLK_CFG);
++	}
+ }
+ 
+ #ifdef CONFIG_SERIAL_QCOM_GENI_CONSOLE
+@@ -1766,6 +2598,9 @@ static int qcom_geni_serial_probe(struct platform_device *pdev)
+ 		return ret;
+ 	}
+ 
++	/* Initialize GSI mode */
++	qcom_geni_serial_init_gsi(uport);
++
+ 	ret = uart_add_one_port(drv, uport);
+ 	if (ret)
+ 		return ret;
+@@ -1792,6 +2627,54 @@ static int qcom_geni_serial_remove(struct platform_device *pdev)
+ 	dev_pm_clear_wake_irq(&pdev->dev);
+ 	device_init_wakeup(&pdev->dev, false);
+ 	uart_remove_one_port(drv, &port->uport);
++	return 0;
++}
++
++/**
++ * qcom_geni_uart_gsi_suspend_resume() - Suspend/Resume GSI DMA channels
++ * @port: Pointer to qcom_geni_serial_port
++ * @suspend: true for suspend, false for resume
++ *
++ * Handles DMA channel pause/resume for GSI mode during power management.
++ * Only operates on TX channel as GPI driver handles RX channel internally.
++ * Operating on both channels causes state machine issues in the GPI driver.
++ *
++ * Return: 0 on success, negative error code on failure
++ */
++static int qcom_geni_uart_gsi_suspend_resume(struct qcom_geni_serial_port *port,
++					     bool suspend)
++{
++	int ret = 0;
++
++	/* Only handle GSI mode */
++	if (!port->gsi_mode || !port->gsi)
++		return 0;
++
++	/*
++	 * Only operate on TX channel - GPI driver handles RX internally.
++	 * Operating on both channels causes state machine issues.
++	 */
++	if (port->gsi->tx_c) {
++		if (suspend) {
++			/* Pause TX DMA channel */
++			ret = dmaengine_pause(port->gsi->tx_c);
++			if (ret) {
++				dev_err(port->uport.dev,
++					"Failed to pause TX channel: %d\n", ret);
++				return ret;
++			}
++			dev_info(port->uport.dev, "GSI TX channel paused\n");
++		} else {
++			/* Resume TX DMA channel */
++			ret = dmaengine_resume(port->gsi->tx_c);
++			if (ret) {
++				dev_err(port->uport.dev,
++					"Failed to resume TX channel: %d\n", ret);
++				return ret;
++			}
++			dev_info(port->uport.dev, "GSI TX channel resumed\n");
++		}
++	}
+ 
+ 	return 0;
+ }
+@@ -1801,6 +2684,7 @@ static int qcom_geni_serial_sys_suspend(struct device *dev)
+ 	struct qcom_geni_serial_port *port = dev_get_drvdata(dev);
+ 	struct uart_port *uport = &port->uport;
+ 	struct qcom_geni_private_data *private_data = uport->private_data;
++	int ret;
+ 
+ 	/*
+ 	 * This is done so we can hit the lowest possible state in suspend
+@@ -1810,6 +2694,23 @@ static int qcom_geni_serial_sys_suspend(struct device *dev)
+ 		geni_icc_set_tag(&port->se, QCOM_ICC_TAG_ACTIVE_ONLY);
+ 		geni_icc_set_bw(&port->se);
+ 	}
++
++	/* Handle GSI mode suspend */
++	if (port->gsi_mode) {
++		/* Flush work queues before suspending */
++		if (port->tx_wq)
++			flush_workqueue(port->tx_wq);
++		if (port->rx_wq)
++			flush_workqueue(port->rx_wq);
++
++		/* Pause GSI DMA channels */
++		ret = qcom_geni_uart_gsi_suspend_resume(port, true);
++		if (ret) {
++			dev_err(dev, "GSI suspend failed: %d\n", ret);
++			return ret;
++		}
++	}
++
+ 	return uart_suspend_port(private_data->drv, uport);
+ }
+ 
+@@ -1825,6 +2726,24 @@ static int qcom_geni_serial_sys_resume(struct device *dev)
+ 		geni_icc_set_tag(&port->se, QCOM_ICC_TAG_ALWAYS);
+ 		geni_icc_set_bw(&port->se);
+ 	}
++
++	/* Handle GSI mode suspend */
++	if (port->gsi_mode) {
++		/* Flush work queues before suspending */
++		if (port->tx_wq)
++			flush_workqueue(port->tx_wq);
++		if (port->rx_wq)
++			flush_workqueue(port->rx_wq);
++
++		/* Pause GSI DMA channels */
++		ret = qcom_geni_uart_gsi_suspend_resume(port, false);
++		if (ret) {
++			dev_err(dev, "GSI suspend failed: %d\n", ret);
++			return ret;
++		}
++	}
++
++	qcom_geni_serial_enable_interrupts(uport);
+ 	return ret;
+ }
+ 
+@@ -1838,6 +2757,11 @@ static const struct qcom_geni_device_data qcom_geni_uart_data = {
+ 	.mode = GENI_SE_DMA,
+ };
+ 
++static const struct qcom_geni_device_data qcom_geni_uart_gsi_data = {
++	.console = false,
++	.mode = GENI_GPI_DMA,
++};
++
+ static const struct dev_pm_ops qcom_geni_serial_pm_ops = {
+ 	SYSTEM_SLEEP_PM_OPS(qcom_geni_serial_sys_suspend,
+ 					qcom_geni_serial_sys_resume)
+@@ -1852,6 +2776,10 @@ static const struct of_device_id qcom_geni_serial_match_table[] = {
+ 		.compatible = "qcom,geni-uart",
+ 		.data = &qcom_geni_uart_data,
+ 	},
++	{
++		.compatible = "qcom,geni-uart-gsi",
++		.data = &qcom_geni_uart_gsi_data,
++	},
+ 	{}
+ };
+ MODULE_DEVICE_TABLE(of, qcom_geni_serial_match_table);
+diff --git a/include/linux/dma/qcom-gpi-dma.h b/include/linux/dma/qcom-gpi-dma.h
+index 6680dd1a43c6..753b890c2bca 100644
+--- a/include/linux/dma/qcom-gpi-dma.h
++++ b/include/linux/dma/qcom-gpi-dma.h
+@@ -80,4 +80,94 @@ struct gpi_i2c_config {
+ 	bool multi_msg;
+ };
+ 
++struct __packed qcom_gpi_tre {
++	u32 dword[4];
++};
++
++/* UART Go TRE */
++#define QCOM_GPI_UART_GO_TRE_DWORD0(en_hunt, command) (((en_hunt) << 8) | (command))
++#define QCOM_GPI_UART_GO_TRE_DWORD1 (0)
++#define QCOM_GPI_UART_GO_TRE_DWORD2 (0)
++#define QCOM_GPI_UART_GO_TRE_DWORD3(link_rx, bei, ieot, ieob, ch) \
++	((0x2 << 20) | (0x0 << 16) | ((link_rx) << 11) | ((bei) << 10) | \
++	((ieot) << 9) | ((ieob) << 8) | (ch))
++
++/* UART Config0 TRE */
++#define QCOM_GPI_UART_CONFIG0_TRE_DWORD0(pack, hunt, flags, parity, sbl, size) \
++	(((pack) << 24) | ((hunt) << 16) | ((flags) << 8) | ((parity) << 5) | \
++	((sbl) << 3) | (size))
++#define QCOM_GPI_UART_CONFIG0_TRE_DWORD1(rfr_level, rx_stale) \
++	(((rfr_level) << 24) | (rx_stale))
++#define QCOM_GPI_UART_CONFIG0_TRE_DWORD2(clk_source, clk_div) \
++	(((clk_source) << 16) | (clk_div))
++#define QCOM_GPI_UART_CONFIG0_TRE_DWORD3(link_rx, bei, ieot, ieob, ch) \
++	((0x2 << 20) | (0x2 << 16) | ((link_rx) << 11) | ((bei) << 10) | \
++	((ieot) << 9) | ((ieob) << 8) | (ch))
++
++/* DMA w. Buffer TRE */
++#ifdef CONFIG_ARM64
++#define QCOM_GPI_DMA_W_BUFFER_TRE_DWORD0(ptr) ((u32)ptr)
++#define QCOM_GPI_DMA_W_BUFFER_TRE_DWORD1(ptr) ((u32)((ptr) >> 32))
++#else
++#define QCOM_GPI_DMA_W_BUFFER_TRE_DWORD0(ptr) (ptr)
++#define QCOM_GPI_DMA_W_BUFFER_TRE_DWORD1(ptr) 0
++#endif
++
++#define QCOM_GPI_DMA_W_BUFFER_TRE_DWORD2(length) ((length) & 0xFFFFFF)
++#define QCOM_GPI_DMA_W_BUFFER_TRE_DWORD3(link_rx, bei, ieot, ieob, ch) \
++	((0x1 << 20) | (0x0 << 16) | ((link_rx) << 11) | ((bei) << 10) | \
++	((ieot) << 9) | ((ieob) << 8) | (ch))
++
++enum qcom_gpi_tce_code {
++	QCOM_GPI_TCE_SUCCESS = 1,
++	QCOM_GPI_TCE_EOT = 2,
++	QCOM_GPI_TCE_EOB = 4,
++	QCOM_GPI_TCE_UNEXP_ERR = 16,
++};
++
++/*
++ * gpi specific callback parameters to pass between gpi client and gpi engine.
++ * client shall set async_desc.callback_parm to qcom_gpi_dma_async_tx_cb_param
++ */
++struct qcom_gpi_dma_async_tx_cb_param {
++	u32 length;
++	enum qcom_gpi_tce_code completion_code; /* TCE event code */
++	u32 status;
++	struct __packed qcom_gpi_tre imed_tre;
++	void *userdata;
++};
++
++/**
++ * struct gpi_uart_config - UART config for peripheral
++ *
++ * @set_config: set peripheral config
++ * @pack_en: process tx/rx buffers as packed
++ * @hunt_char: hunt character for pattern matching
++ * @flags: UART control flags
++ * @parity: parity mode (0=none, 1=odd, 2=even)
++ * @stop_bits: stop bit length (0=0.5, 1=1, 2=1.5, 3=2)
++ * @char_size: character size (0=5bits, 7=8bits)
++ * @en_hunt: enable hunt mode
++ * @command: UART command
++ * @rfr_level: RFR watermark level
++ * @rx_stale: RX stale timeout count
++ * @clk_src: clock source
++ * @clk_div: clock divider
++ */
++struct gpi_uart_config {
++	u8 set_config;
++	u8 pack_en;
++	u8 hunt_char;
++	u8 flags;
++	u8 parity;
++	u8 stop_bits;
++	u8 char_size;
++	u8 en_hunt;
++	u8 command;
++	u8 rfr_level;
++	u16 rx_stale;
++	u16 clk_src;
++	u16 clk_div;
++};
++
+ #endif /* QCOM_GPI_DMA_H */
+-- 
+2.34.1
+

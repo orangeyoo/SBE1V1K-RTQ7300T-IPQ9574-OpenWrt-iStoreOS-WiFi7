@@ -1,0 +1,10 @@
+#!/bin/sh
+# SBE1V1K: remember the PPPoE session the BRAS just gave us, so the next
+# boot can send PADT for it if this one ends without pppd doing so
+# (power loss, panic, hang). See /etc/init.d/sbe-pppoe-padt.
+STATE=/etc/sbe-pppoe-session
+line=$(awk 'NR > 1 { print $3, $1, $2; exit }' /proc/net/pppoe 2>/dev/null)
+[ -n "$line" ] || exit 0
+[ "$(cat $STATE 2>/dev/null)" = "$line" ] && exit 0
+echo "$line" > $STATE.tmp && mv $STATE.tmp $STATE
+exit 0

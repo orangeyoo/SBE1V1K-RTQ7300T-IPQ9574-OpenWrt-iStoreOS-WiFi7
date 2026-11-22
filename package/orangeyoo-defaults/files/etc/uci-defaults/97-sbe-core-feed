@@ -1,0 +1,14 @@
+#!/bin/sh
+# Offer the image's offline target feed (/usr/lib/sbe-core-feed, see
+# release/build.sh) to opkg on upgraded units too. 96-sbe-environment writes
+# it on a fresh install, but sysupgrade here keeps the whole overlay: a
+# uci-defaults script that already ran stays deleted (whiteout) and the old
+# /etc/opkg/distfeeds.conf keeps shadowing the image, so upgraded units never
+# got the feed (measured on the node 2026-11-16). A separate, idempotent
+# script runs once on every unit that does not have it yet.
+F=/etc/opkg/distfeeds.conf
+L='src/gz sbe_core file:///usr/lib/sbe-core-feed'
+[ -d /usr/lib/sbe-core-feed ] || exit 0
+grep -qxF "$L" "$F" 2>/dev/null && exit 0
+{ echo "$L"; cat "$F" 2>/dev/null; } > "$F.new" && mv "$F.new" "$F"
+exit 0

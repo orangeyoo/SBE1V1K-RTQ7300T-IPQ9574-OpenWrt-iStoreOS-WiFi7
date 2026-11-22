@@ -1,0 +1,31 @@
+From 46fb934aea9d739c9e2f16fe67eb55223e767f5a Mon Sep 17 00:00:00 2001
+From: Sridharan S N <sridsn@qti.qualcomm.com>
+Date: Tue, 7 Jul 2026 10:46:27 +0530
+Subject: [PATCH] phy: qcom-qmp-pcie: ipq9650: Fix PCIe link instability by
+ tuning RX_MODE_00_HIGH4
+
+Configure QSERDES_V4_RX_RX_MODE_00_HIGH4 = 0x3A for both RX0 and RX1
+lanes in the IPQ9650 (JUHU RC) PCIe PHY init table.
+
+Change-Id: Ib2157b58d6830c0baced77d73f8d069d78cabaa6
+Signed-off-by: Sridharan S N <sridsn@qti.qualcomm.com>
+---
+ drivers/phy/qualcomm/phy-qcom-qmp-pcie.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/phy/qualcomm/phy-qcom-qmp-pcie.c b/drivers/phy/qualcomm/phy-qcom-qmp-pcie.c
+index 7b1b0b136a93..f7334d0e246c 100644
+--- a/drivers/phy/qualcomm/phy-qcom-qmp-pcie.c
++++ b/drivers/phy/qualcomm/phy-qcom-qmp-pcie.c
+@@ -971,7 +971,7 @@ static const struct qmp_phy_init_tbl ipq9650_pcie_rx_tbl[] = {
+ 	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_00_HIGH, 0x3F),
+ 	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_00_HIGH2, 0xFF),
+ 	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_00_HIGH3, 0x67),
+-	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_00_HIGH4, 0x35),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_00_HIGH4, 0x3A),
+ 	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_IDAC_TSETTLE_HIGH, 0x00),
+ 	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_IDAC_TSETTLE_LOW, 0xC0),
+ };
+-- 
+2.34.1
+

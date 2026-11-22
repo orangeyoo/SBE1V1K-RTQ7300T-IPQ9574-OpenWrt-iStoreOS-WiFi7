@@ -1,0 +1,57 @@
+#!/bin/sh
+# Orangeyoo 2.0: stable per-port wired MACs from THIS unit's ART (0:ART, p20).
+#
+# Why here: the 6.6 qca-nss-dp driver never consumes the DTS nvmem mac-base
+# cells - qca/src/linux-6.6 ships neither the mmc-card nvmem provider nor the
+# mac-base cell post-process - so every wired port fell back to
+# eth_hw_addr_random() (addr_assign_type=1): DHCP leases, ARP/FDB learning
+# and the dropbear host key all churned on every boot.  This uci-defaults
+# assigns the MACs netifd-side (config device macaddr, persistent), once,
+# before any DHCP client starts.  Each unit derives them from its own ART -
+# never a cross-unit constant (iron rule: no copied MACs).
+#
+# Scheme (Orangeyoo 1.0 role-corrected parity; ART MAC table @0x0 holds
+# base, then 4x base+1 entries - matching the vendor factory layout):
+#   dp2/eth1 (2.5G WAN) = base+0
+#   dp1/eth0 (10G LAN), dp3/eth2 + dp4/eth3 (1G LAN) = base+1 (shared LAN
+#   MAC across the br-lan members; dp3/dp4 netdev names flip between boots,
+#   the shared MAC makes the flip harmless)
+#   radios already derive base-3/-2/-1 via board-2.bin - no overlap.
+# Kernel-level fix candidate for a later round: port the mmc-card nvmem
+# provider + mac-base read_post_process so the existing DTS cells work
+# driver-side and the MAC is bound to the dp node itself.
+
+ART=/dev/mmcblk0p20
+[ -b "$ART" ] || exit 0
+
+# board busybox hexdump ':%02x' emits colon-separated pairs directly:
+# ":aa:bb:cc:dd:ee:ff" -> cut leading colon -> a well-formed MAC string.
+# (never quote a real unit MAC here: identity literals must not be baked
+# into the shipped image - compliance scan flags them on purpose)
+BASE_HEX=$(dd if="$ART" bs=6 count=1 2>/dev/null | hexdump -v -e '6/1 ":%02x"' | cut -c2-)
+[ "${#BASE_HEX}" = "17" ] || exit 0
+case "$BASE_HEX" in
+	00:00:00:00:00:00|ff:ff:ff:ff:ff:ff) exit 0 ;;
+esac
+
+. /lib/functions/system.sh
+MAC0="$BASE_HEX"
+MAC1=$(macaddr_add "$MAC0" 1)
+[ -n "$MAC0" ] && [ -n "$MAC1" ] || exit 0
+
+uci -q set network.wired_mac_eth1=device
+uci -q set network.wired_mac_eth1.name='eth1'
+uci -q set network.wired_mac_eth1.macaddr="$MAC0"
+uci -q set network.wired_mac_eth0=device
+uci -q set network.wired_mac_eth0.name='eth0'
+uci -q set network.wired_mac_eth0.macaddr="$MAC1"
+uci -q set network.wired_mac_eth2=device
+uci -q set network.wired_mac_eth2.name='eth2'
+uci -q set network.wired_mac_eth2.macaddr="$MAC1"
+uci -q set network.wired_mac_eth3=device
+uci -q set network.wired_mac_eth3.name='eth3'
+uci -q set network.wired_mac_eth3.macaddr="$MAC1"
+uci commit network
+
+logger -t wired-mac "applied ART MACs: eth1=$MAC0 eth0/eth2/eth3=$MAC1"
+exit 0

@@ -1,0 +1,46 @@
+From 0f1528b79c4b0ea76f96e7f112f0dbbe8e1f4576 Mon Sep 17 00:00:00 2001
+From: Prateek Sharma <prsha@qti.qualcomm.com>
+Date: Fri, 29 May 2026 12:30:57 +0530
+Subject: [PATCH] net: Set solicited bit to 0 in DAD proxy NA
+
+Change-Id: I462846ba9a79d39a9049313ab8603aea671ffa39
+Signed-off-by: Prateek Sharma <prsha@qti.qualcomm.com>
+---
+ net/bridge/br_arp_nd_proxy.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/net/bridge/br_arp_nd_proxy.c b/net/bridge/br_arp_nd_proxy.c
+index e179123ba185..5ef2d6db3544 100644
+--- a/net/bridge/br_arp_nd_proxy.c
++++ b/net/bridge/br_arp_nd_proxy.c
+@@ -260,7 +260,9 @@ static void br_nd_send(struct net_bridge *br, struct net_bridge_port *p,
+ 	int i, len;
+ 	u8 *daddr;
+ 	u16 pvid;
++	bool is_dad_ns = false;
+ 
++	is_dad_ns = ipv6_addr_any(&(ipv6_hdr(request)->saddr));
+ 	if (!dev)
+ 		return;
+ 
+@@ -310,7 +312,7 @@ static void br_nd_send(struct net_bridge *br, struct net_bridge_port *p,
+ 	pip6->priority = ipv6_hdr(request)->priority;
+ 	pip6->nexthdr = IPPROTO_ICMPV6;
+ 	pip6->hop_limit = 255;
+-	pip6->daddr = ipv6_addr_any(&(ipv6_hdr(request)->saddr)) ? in6addr_linklocal_allnodes : ipv6_hdr(request)->saddr;
++	pip6->daddr = is_dad_ns ? in6addr_linklocal_allnodes : ipv6_hdr(request)->saddr;
+ 	pip6->saddr = *(struct in6_addr *)n->primary_key;
+ 
+ 	skb_pull(reply, sizeof(struct ipv6hdr));
+@@ -323,7 +325,7 @@ static void br_nd_send(struct net_bridge *br, struct net_bridge_port *p,
+ 	na->icmph.icmp6_type = NDISC_NEIGHBOUR_ADVERTISEMENT;
+ 	na->icmph.icmp6_router = (n->flags & NTF_ROUTER) ? 1 : 0;
+ 	na->icmph.icmp6_override = 1;
+-	na->icmph.icmp6_solicited = 1;
++	na->icmph.icmp6_solicited = is_dad_ns ? 0 : 1;
+ 	na->target = ns->target;
+ 	ether_addr_copy(&na->opt[2], n->ha);
+ 	na->opt[0] = ND_OPT_TARGET_LL_ADDR;
+-- 
+2.34.1
+

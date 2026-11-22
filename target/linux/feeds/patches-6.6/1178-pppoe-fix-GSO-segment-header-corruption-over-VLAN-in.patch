@@ -1,0 +1,30 @@
+From c0b7c3150832f58fec150fbb6c18ecb7303f96d9 Mon Sep 17 00:00:00 2001
+From: KRITHI D SHETTY <kdshetty@qti.qualcomm.com>
+Date: Thu, 21 May 2026 20:05:43 +0530
+Subject: [PATCH] pppoe: fix GSO segment header corruption over VLAN interface
+
+Use mac_len instead of ETH_HLEN in pppoe_gso_segment() to correctly
+locate the PPPoE header when a VLAN header is present in packet data.
+
+Change-Id: I61ba3bee0f2178c6a5fef7c777f22e6b7a8774af
+Signed-off-by: KRITHI D SHETTY <kdshetty@qti.qualcomm.com>
+---
+ drivers/net/ppp/pppoe.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/net/ppp/pppoe.c b/drivers/net/ppp/pppoe.c
+index 3ec2dff5fb0a..7a8b81c77fa8 100644
+--- a/drivers/net/ppp/pppoe.c
++++ b/drivers/net/ppp/pppoe.c
+@@ -557,7 +557,7 @@ static struct sk_buff *pppoe_gso_segment(struct sk_buff *skb, netdev_features_t
+ 		skb->mac_len = mac_len;
+ 		skb->protocol = protocol;
+ 		skb_reset_mac_header(skb);
+-		skb_set_network_header(skb, ETH_HLEN);
++		skb_set_network_header(skb, mac_len);
+ 
+ 		/* Set this based on protocol v4 or v6 */
+ 		ph = pppoe_hdr(skb);
+-- 
+2.34.1
+

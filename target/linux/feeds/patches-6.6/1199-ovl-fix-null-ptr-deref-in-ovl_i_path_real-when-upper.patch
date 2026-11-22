@@ -1,0 +1,59 @@
+From ed34eb822f1c6dd4de5ddd11e6ace9a195ca5c00 Mon Sep 17 00:00:00 2001
+From: Poovendhan Selvaraj <poovendh@qti.qualcomm.com>
+Date: Mon, 22 Jun 2026 15:52:43 +0530
+Subject: [PATCH] ovl: fix null-ptr-deref in ovl_i_path_real() when upper mount
+ is NULL
+
+A null pointer dereference is observed in ovl_permission() at offset
+0x150/0x190 on ARM64:
+
+  BUG: KASAN: null-ptr-deref in ovl_permission+0x150/0x190
+  Read of size 8 at addr 0000000000000018 by task modprobe/23238
+
+The crash address 0x18 corresponds to the mnt_idmap field of struct
+vfsmount (offset 24 bytes), meaning realpath.mnt is NULL when
+mnt_idmap(realpath.mnt) is called in ovl_permission().
+
+In ovl_i_path_real(), when the inode has an upper dentry, path->mnt is
+set to ovl_upper_mnt(OVL_FS(inode->i_sb)). ovl_upper_mnt() returns
+ofs->layers[0].mnt, which is NULL when the overlay has no upper layer
+(read-only overlay). In this case path->dentry is non-NULL but
+path->mnt is NULL, causing the crash in the caller.
+
+Additionally, if lowerpath is NULL (no lower paths) and path->dentry
+is also NULL, the existing code would crash on lowerpath->dentry.
+
+Fix both cases in ovl_i_path_real():
+- Guard lowerpath dereference with a NULL check
+- If ovl_upper_mnt() returns NULL, clear path->dentry so the function
+  returns NULL, triggering the existing -ECHILD guard in callers
+  (ovl_permission() returns -ECHILD for RCU retry)
+
+Change-Id: I2ffbca9a9ea6dd44246de7ff2b5df63be765b30d
+Signed-off-by: Poovendhan Selvaraj <poovendh@qti.qualcomm.com>
+---
+ fs/overlayfs/util.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/fs/overlayfs/util.c b/fs/overlayfs/util.c
+index 0da1cd01d01c..8028102ab87b 100644
+--- a/fs/overlayfs/util.c
++++ b/fs/overlayfs/util.c
+@@ -343,10 +343,12 @@ struct inode *ovl_i_path_real(struct inode *inode, struct path *path)
+ 
+ 	path->dentry = ovl_i_dentry_upper(inode);
+ 	if (!path->dentry) {
+-		path->dentry = lowerpath->dentry;
+-		path->mnt = lowerpath->layer->mnt;
++		path->dentry = lowerpath ? lowerpath->dentry : NULL;
++		path->mnt = lowerpath ? lowerpath->layer->mnt : NULL;
+ 	} else {
+ 		path->mnt = ovl_upper_mnt(OVL_FS(inode->i_sb));
++		if (unlikely(!path->mnt))
++			path->dentry = NULL;
+ 	}
+ 
+ 	return path->dentry ? d_inode_rcu(path->dentry) : NULL;
+-- 
+2.34.1
+

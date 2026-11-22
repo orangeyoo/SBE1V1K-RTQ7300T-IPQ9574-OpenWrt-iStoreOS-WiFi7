@@ -1,0 +1,19 @@
+# release/scan-rules/private.rules — patterns that must never appear in a release image.
+# Format: <id> <tab> <grep -E -i pattern>
+# Scanned on: rootfs readback (unsquashfs), raw image bytes (strings), and the
+# git-tracked source tree. Exemptions: release/scan-rules/allow.list (path regex + reason).
+#
+# The maintainer's own list also pins the factory MACs / serials / SSIDs of the lab
+# units and the developer network; those entries are not published. Add your own
+# unit identifiers below before running release/gate.sh.
+#
+# ---- unit identity (fill in your own) ----
+# mac.unit	<your WAN MAC, e.g. 90[:-]?d3[:-]?cf[:-]?xx[:-]?xx>
+# serial.unit	<your factory serial, e.g. 70KWxxxx>
+ssid.oem	SpectrumSetup|Setup-[0-9A-F]{4}\b
+# ---- credentials ----
+cred.binding	binding\.key
+cred.ha	webhook_id|homeassistant.*token|Bearer [A-Za-z0-9._-]{20,}
+cred.privkey	BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY
+# ---- build/vendor leftovers that customers must not see ----
+brand.qwrt	QWRT

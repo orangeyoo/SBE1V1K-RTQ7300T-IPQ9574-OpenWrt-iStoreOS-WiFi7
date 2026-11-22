@@ -1,0 +1,30 @@
+#!/bin/sh
+# Wiro SBE1V1K: LuCI wireless page hardening (ported from Orangeyoo 1.0,
+# where the r16 LuCI view was patched in the build tree; 2.0 ships the
+# upstream LuCI 24.10 view from the luci feed, so the same hardening is
+# applied by an idempotent first-boot patch instead of a source edit -
+# feeds/luci is a wiped-and-refetched checkout and cannot carry it).
+#
+#  1) remove the mesh / 802.11s mode option (product rule: mesh mode is
+#     out of scope; the original vendor upstream driver had no mesh VAP).
+#  2) lock the 6 GHz band encryption menu to OWE (iron rule #7: no
+#     SAE/WPA3 on 6G; a fully-open 6G VAP is rejected by hostapd anyway).
+# If the upstream anchors ever drift (LuCI feed update) both seds simply
+# do not match and the stock view is left untouched - fail-safe by design.
+JS=/www/luci-static/resources/view/network/wireless.js
+[ -f "$JS" ] || exit 0
+grep -q 'o2-luci-hardening' "$JS" && exit 0
+
+changed=""
+# 1) mesh / 802.11s option off
+if grep -q "if (have_mesh) mode.value('mesh', '802.11s');" "$JS"; then
+	sed -i "s|if (have_mesh) mode.value('mesh', '802.11s');|if (false \&\& have_mesh) mode.value('mesh', '802.11s'); /* Wiro SBE1V1K o2-luci-hardening: mesh/802.11s disabled (no mesh VAP in the original vendor upstream driver chain) */|" "$JS" \
+		&& changed="$changed mesh-off"
+fi
+# 2) 6G encryption locked to OWE
+if grep -q "crypto_modes.sort(function(a, b) { return b\[2\] - a\[2\]; });" "$JS"; then
+	sed -i "s|crypto_modes.sort(function(a, b) { return b\[2\] - a\[2\]; });|if (is_6ghz) crypto_modes = crypto_modes.filter(function (m) { return m[0] == 'owe'; }); /* Wiro SBE1V1K o2-luci-hardening: 6G locked to OWE */\n\t\t\t\tcrypto_modes.sort(function(a, b) { return b[2] - a[2]; });|" "$JS" \
+		&& changed="$changed 6g-owe"
+fi
+[ -n "$changed" ] && logger -t o2-hardening "LuCI wireless.js hardened:$changed"
+exit 0

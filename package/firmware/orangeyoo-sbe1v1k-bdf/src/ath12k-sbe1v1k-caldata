@@ -1,0 +1,34 @@
+#!/bin/sh
+# Orangeyoo SBE1V1K: serve ath12k per-radio calibration from this unit's
+# own 0:ART partition (GPT label "0:ART", p20 on the 43-partition factory
+# layout).  ath12k requests cal-pci-<domain:bus:dev.func>.bin from the
+# runtime fw.dir; absent files make the loader emit a firmware uevent, and
+# the sysfs fallback (CONFIG_FW_LOADER_USER_HELPER_FALLBACK=y) lets this
+# script stream the block straight from the local partition into the
+# request -- RAM only, no persistent per-unit file is written, so the
+# shipped firmware stays free of unit identity.
+#
+# Radio -> ART block map (see ipq9574-sbe1v1k.dts wifi@0 caldata_offset):
+#   pcie1 0001:01:00.0 (board_id 1)  -> 0x58800, len 0xf800
+#   pcie2 0002:01:00.0 (board_id 4)  -> 0x8a800, len 0x19000
+#   pcie3 0003:01:00.0 (board_id 2)  -> 0xbc800, len 0x18800
+#
+# The sysfs fallback fires for every firmware request that misses on-disk
+# files, so this script exits unless the requested name is one of ours.
+
+[ -e /lib/firmware/$FIRMWARE ] && exit 0
+
+. /lib/functions/caldata.sh
+
+case "$FIRMWARE" in
+	cal-pci-0001:01:00.0.bin) offset=0x58800; count=0xf800 ;;
+	cal-pci-0002:01:00.0.bin) offset=0x8a800; count=0x19000 ;;
+	cal-pci-0003:01:00.0.bin) offset=0xbc800; count=0x18800 ;;
+	*) exit 0 ;;
+esac
+
+source=$(find_mmc_part "0:ART" mmcblk0)
+[ -n "$source" ] || source=/dev/mmcblk0p20
+[ -b "$source" ] || exit 0
+
+caldata_sysfsload_from_file "$source" "$offset" "$count"

@@ -1,0 +1,10 @@
+# release/scan-rules/ui-words.rules — words that must not appear in customer-visible text.
+# Format: <id> <tab> <grep -E -i pattern> [<tab> <path scope regex, default = all UI surfaces>]
+# UI surfaces (gate.sh): /www, LuCI menus/views/i18n strings, /etc/banner,
+# /etc/openwrt_release, /etc/openwrt_version, /usr/lib/os-release.
+VISIBLE=^/(etc/banner|etc/openwrt_release|etc/openwrt_version|usr/lib/os-release|usr/lib/lua/luci/i18n/.*\.txt|www/luci-static/quickstart/i18n/.*|usr/share/luci/menu\.d/.*)$
+ver.prerelease	[0-9]-pre[0-9]+|-dev-[0-9a-f]{7}|-dirty\b|-rc[0-9]+\b
+ver.internal	Orangeyoo 2\.0|orangeyoo-2\.0|o2-staging|\bpre[0-9]{2}\b
+word.debug	\b(TODO|FIXME|HACK)\b|调试版|测试版|内部版	VISIBLE
+brand.vendor	\bAskey\b|\bSpectrum\b|\bQWRT\b	VISIBLE
+brand.ai	\b(Claude|ZCode|GLM|Codex)\b

@@ -1,0 +1,151 @@
+#!/bin/sh
+# SBE1V1K: a live carrier with no TX progress and rising driver drops.
+dev=${1:-eth1}
+iface=${2:-wan}
+case "$dev" in
+	*[!a-zA-Z0-9_.-]*|.|..) exit 1 ;;
+esac
+net="/sys/class/net/$dev"
+marker=/etc/sbe-wan-txwatch.last-reboot
+
+log() {
+	logger -t sbe-wan-txwatch -p "daemon.$1" "$dev: $2"
+}
+
+link_up() {
+	local carrier state
+	read -r carrier 2>/dev/null < "$net/carrier" && [ "$carrier" = 1 ] &&
+		read -r state 2>/dev/null < "$net/operstate" && [ "$state" = up ]
+}
+
+# The logical WAN interface is up (PPPoE/DHCP done). If netifd does not know
+# the interface, count it as up so the watchdog never reboots on a guess.
+wan_up() {
+	local st
+	st=$(ifstatus "$iface" 2>/dev/null) || return 0
+	case "$st" in *'"up": true'*) return 0 ;; esac
+	return 1
+}
+
+sample() {
+	link_up && read -r tx 2>/dev/null < "$net/statistics/tx_packets" || return 1
+	drops=$(ethtool -S "$dev" 2>/dev/null | awk '$1 == "tx_dropped:" && NF == 2 { print $2 }')
+	case "$tx" in ''|*[!0-9]*) return 1 ;; esac
+	case "$drops" in ''|*[!0-9]*) return 1 ;; esac
+	link_up
+}
+
+cycle_link() {
+	# Do not leave the port down if procd stops us mid-cycle.
+	trap 'ip link set dev "$dev" up; exit 0' TERM INT
+	if ! ip link set dev "$dev" down; then
+		trap - TERM INT
+		log err 'could not bring link down'
+		return
+	fi
+	sleep 3
+	ip link set dev "$dev" up || log err 'could not bring link up'
+	trap - TERM INT
+}
+
+reboot_if_allowed() {
+	local now last tmp
+	now=$(date +%s)
+	last=0
+	if [ -e "$marker" ] && ! read -r last < "$marker"; then
+		log err 'TX still stalled; reboot suppressed: cannot read reboot marker'
+		return
+	fi
+	# Fail closed if the wall clock looks unset, went backwards, or the
+	# marker is invalid. Never reboot unless the new timestamp is durable.
+	case "$now:$last" in
+		*[!0-9:]*|:*|*:|0*|*:0?*)
+			log err 'TX still stalled; reboot suppressed: invalid clock or marker'
+			return ;;
+	esac
+	if [ "${#now}" -gt 12 ] || [ "${#last}" -gt 12 ] ||
+		[ "$now" -lt 1704067200 ] || [ "$last" -gt "$now" ]; then
+		log err 'TX still stalled; reboot suppressed: clock unset or behind reboot marker'
+		return
+	fi
+	if [ "$((now - last))" -lt 21600 ]; then
+		log err 'TX still stalled; reboot rate-limited (6 h); will retry link cycle'
+		return
+	fi
+	if ! tmp=$(mktemp "$marker.XXXXXX"); then
+		log err 'TX still stalled; reboot suppressed: cannot create reboot marker'
+		return
+	fi
+	if ! (printf '%s\n' "$now" > "$tmp" && mv -f "$tmp" "$marker" && sync); then
+		rm -f "$tmp"
+		log err 'TX still stalled; reboot suppressed: cannot persist reboot marker'
+		return
+	fi
+	log crit "TX still stalled (tx_packets=$tx, tx_dropped=$drops); rebooting"
+	reboot || log err 'reboot command failed'
+}
+
+prev_tx=
+prev_drops=
+cycle_at=0
+check_at=0
+retry_at=0
+wan_check_at=0
+
+while :; do
+	sleep 10
+	read -r uptime _ < /proc/uptime || continue
+	uptime=${uptime%%.*}
+	[ "$uptime" -ge 120 ] || continue
+	# A few frames (PPPoE PADI) leaving after the cycle clear the TX check
+	# below, yet on 2026-11-20 the WAN stayed down until a manual reboot.
+	# Judge the cycle by the WAN itself two minutes later.
+	if [ "$wan_check_at" -ne 0 ] && [ "$uptime" -ge "$wan_check_at" ]; then
+		wan_check_at=0
+		if ! wan_up; then
+			log err "WAN $iface still down 120 s after link cycle"
+			reboot_if_allowed
+			retry_at=$((cycle_at + 300))
+		fi
+	fi
+	if ! sample; then
+		# Never count a link-down interval or a missing counter as a stall.
+		prev_tx=
+		continue
+	fi
+	if [ -n "$prev_tx" ] && [ "$tx" != "$prev_tx" ]; then
+		# TX made progress after the cycle, so clear pending escalation.
+		check_at=0
+	fi
+	if [ "$tx" != "$prev_tx" ] || [ "$drops" -lt "$prev_drops" ]; then
+		base_drops=$drops
+		last_drop_at=$uptime
+		window_at=$uptime
+	elif [ "$drops" -gt "$prev_drops" ]; then
+		last_drop_at=$uptime
+	fi
+	prev_tx=$tx
+	prev_drops=$drops
+
+	# Three full 10 s intervals (four readings). The latest increase
+	# must fall inside the most recent 30 s, so idle links do not fire.
+	[ "$((uptime - window_at))" -ge 30 ] &&
+		[ "$((uptime - last_drop_at))" -lt 30 ] && [ "$drops" -gt "$base_drops" ] || continue
+	if [ "$check_at" -ne 0 ]; then
+		[ "$uptime" -ge "$check_at" ] || continue
+		reboot_if_allowed
+		check_at=0
+		retry_at=$((cycle_at + 300))
+		continue
+	fi
+	[ "$uptime" -ge "$retry_at" ] || continue
+	log warning "TX stalled (tx_packets=$tx, tx_dropped=$base_drops->$drops); cycling link"
+	cycle_at=$uptime
+	cycle_link
+	# Start a fresh observation window after the cycle. netifd handles
+	# carrier events and brings autostart WAN back without an ifup call.
+	read -r cycle_end _ < /proc/uptime || cycle_end=$((uptime + 3))
+	check_at=$((${cycle_end%%.*} + 60))
+	wan_check_at=$((${cycle_end%%.*} + 120))
+	prev_tx=
+done

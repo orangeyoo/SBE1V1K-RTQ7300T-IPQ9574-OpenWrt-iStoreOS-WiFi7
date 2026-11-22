@@ -1,0 +1,30 @@
+From 4ab188808467b636ed98bdb15d61b15759388997 Mon Sep 17 00:00:00 2001
+From: Thahir Ahamed T <tahamedt@qti.qualcomm.com>
+Date: Mon, 8 Jun 2026 10:32:51 +0530
+Subject: [PATCH] qcom-wdt: Switch to readl() for IMEM
+
+Switch to readl() instead of memcpy_fromio() for correct
+32-bit MMIO register access.
+
+Change-Id: I33213e4b33c90b9ef5e4153ef1e09c92ce39749d
+Signed-off-by: Thahir Ahamed T <tahamedt@qti.qualcomm.com>
+---
+ drivers/watchdog/qcom-wdt.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/watchdog/qcom-wdt.c b/drivers/watchdog/qcom-wdt.c
+index cefe3bc8a4e2..124884be208f 100644
+--- a/drivers/watchdog/qcom-wdt.c
++++ b/drivers/watchdog/qcom-wdt.c
+@@ -248,7 +248,7 @@ static int qcom_wdt_imem_read(struct device *dev, const char *compatible,
+ 		return -ENOMEM;
+ 	}
+ 
+-	memcpy_fromio(val, addr, sizeof(*val));
++	*val = readl(addr);
+ 	iounmap(addr);
+ 
+ 	return 0;
+-- 
+2.34.1
+

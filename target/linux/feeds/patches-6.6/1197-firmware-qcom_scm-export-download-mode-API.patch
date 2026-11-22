@@ -1,0 +1,57 @@
+From 39e64e31c055d21f5e5d13f66370a943e897753a Mon Sep 17 00:00:00 2001
+From: Timple Raj M <timple@qti.qualcomm.com>
+Date: Tue, 23 Jun 2026 20:19:08 +0530
+Subject: [PATCH] firmware: qcom_scm: export download mode API
+
+Make qcom_scm_set_download_mode() non-static and export it
+for use by other drivers.
+
+This allows clients to control DLOAD mode (enable/disable)
+during system restart flows.
+
+Export the symbol via GPL and add the corresponding
+prototype in the public header.
+
+Change-Id: I7ad516ad380712e2924f98805bb84a1696ae5b75
+Signed-off-by: Timple Raj M <timple@qti.qualcomm.com>
+---
+ drivers/firmware/qcom_scm.c            | 3 ++-
+ include/linux/firmware/qcom/qcom_scm.h | 1 +
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/firmware/qcom_scm.c b/drivers/firmware/qcom_scm.c
+index 7e334e26ab06..6978f348b093 100644
+--- a/drivers/firmware/qcom_scm.c
++++ b/drivers/firmware/qcom_scm.c
+@@ -663,7 +663,7 @@ static void qcom_scm_set_abnormal_magic(bool enable)
+ 			val & ~(QCOM_SCM_ABNORMAL_MAGIC));
+ }
+ 
+-static void qcom_scm_set_download_mode(bool enable)
++void qcom_scm_set_download_mode(bool enable)
+ {
+ 	u32 val = enable ? QCOM_DLOAD_FULLDUMP : QCOM_DLOAD_NODUMP;
+ 	bool avail;
+@@ -686,6 +686,7 @@ static void qcom_scm_set_download_mode(bool enable)
+ 	if (ret)
+ 		dev_err(__scm->dev, "failed to set download mode: %d\n", ret);
+ }
++EXPORT_SYMBOL_GPL(qcom_scm_set_download_mode);
+ 
+ /**
+  * qcom_scm_pas_init_image() - Initialize peripheral authentication service
+diff --git a/include/linux/firmware/qcom/qcom_scm.h b/include/linux/firmware/qcom/qcom_scm.h
+index f1b7b1f4c3e6..88b2eff274bf 100644
+--- a/include/linux/firmware/qcom/qcom_scm.h
++++ b/include/linux/firmware/qcom/qcom_scm.h
+@@ -265,6 +265,7 @@ extern bool qcom_scm_is_available(void);
+ extern int qcom_scm_set_cold_boot_addr(void *entry);
+ extern int qcom_scm_set_warm_boot_addr(void *entry);
+ extern void qcom_scm_cpu_power_down(u32 flags);
++extern void qcom_scm_set_download_mode(bool enable);
+ extern int qcom_scm_set_remote_state(u32 state, u32 id);
+ extern int qcom_scm_derive_and_share_key(uint32_t key_len, uint8_t *sw_context,
+ 				u32 sw_context_len, uint8_t *derived_key,
+-- 
+2.34.1
+

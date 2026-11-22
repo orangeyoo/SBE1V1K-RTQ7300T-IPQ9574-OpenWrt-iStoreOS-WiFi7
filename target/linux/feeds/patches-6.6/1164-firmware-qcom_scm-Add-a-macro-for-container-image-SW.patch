@@ -1,0 +1,26 @@
+From b091f54dcc6c70f49225a31dbd90dab04d7719a4 Mon Sep 17 00:00:00 2001
+From: Devi Priya <devipriy@qti.qualcomm.com>
+Date: Thu, 19 Mar 2026 00:28:43 +0530
+Subject: [PATCH] firmware: qcom_scm: Add a macro for container image SWID
+
+Change-Id: I436edc67102c35d9c83d889428d284df025f0e7c
+Signed-off-by: Devi Priya <devipriy@qti.qualcomm.com>
+---
+ include/linux/firmware/qcom/qcom_scm.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/include/linux/firmware/qcom/qcom_scm.h b/include/linux/firmware/qcom/qcom_scm.h
+index fdb82abbcf02..82e7ce85c64c 100644
+--- a/include/linux/firmware/qcom/qcom_scm.h
++++ b/include/linux/firmware/qcom/qcom_scm.h
+@@ -230,6 +230,7 @@ enum qcom_scm_ice_cipher {
+ #define QCOM_AUTH_FUSE_UIE_KEY_CMD 0x23
+ #define QCOM_KERNEL_META_AUTH_CMD  0x23
+ #define QCOM_KERNEL_HASH_N_META_AUTH_CMD 0x24
++#define QCOM_CONTAINER_IMG_SW_ID	0xCD
+ 
+ #define QTI_OWNER_QSEE_OS		50
+ #define QTI_OWNER_TZ_APPS		48
+-- 
+2.34.1
+

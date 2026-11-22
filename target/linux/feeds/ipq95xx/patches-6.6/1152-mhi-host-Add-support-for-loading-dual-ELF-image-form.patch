@@ -1,0 +1,65 @@
+From 726cfca9298322c8a66f8e55bea44223572624c9 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <qiang.yu@oss.qualcomm.com>
+Date: Fri, 10 Apr 2026 00:33:21 +0530
+Subject: [PATCH] mhi: host: Add support for loading dual ELF image format
+
+Currently, the FBC image contains a single ELF header followed by segments
+for both SBL and WLAN FW. However, TME-L (Trust Management Engine Lite)
+supported devices (e.g., QCC2072) require separate ELF headers for SBL and
+WLAN FW segments due to TME-L image authentication requirements.
+
+Current image format contains two sections in a single binary:
+- First 512KB: ELF header + SBL segments
+- Remaining: WLAN FW segments (raw data)
+
+The TME-L supported image format contains two complete ELF files in a
+single binary:
+- First 512KB: Complete SBL ELF file (ELF header + SBL segments)
+- Remaining: Complete WLAN FW ELF file (ELF header + WLAN FW segments)
+
+Download behavior:
+- Legacy: 1. First 512KB via BHI (ELF header + SBL)
+          2. Full image via BHIe
+
+- TME-L: 1. First 512KB via BHI (SBL ELF file)
+         2. Remaining via BHIe (WLAN FW ELF file only)
+
+Add runtime detection to automatically identify the image format by
+checking for the presence of a second ELF header at the 512KB boundary.
+When detected, MHI skips the first 512KB during WLAN FW download over BHIe
+as it is loaded in BHI phase.
+
+Signed-off-by: Qiang Yu <qiang.yu@oss.qualcomm.com>
+Signed-off-by: Manivannan Sadhasivam <manivannan.sadhasivam@oss.qualcomm.com>
+Link: https://patch.msgid.link/20251223-wlan_image_load_skip_512k-v5-1-8d4459d720b5@oss.qualcomm.com
+
+Change-Id: I1896f76d85bbc6f81928d93752d09e02e08f4c4c
+Signed-off-by: Vignesh Viswanathan <viswanat@qti.qualcomm.com>
+---
+ drivers/bus/mhi/host/boot.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/drivers/bus/mhi/host/boot.c b/drivers/bus/mhi/host/boot.c
+index 4980000bf28b..31b6a4e021d8 100644
+--- a/drivers/bus/mhi/host/boot.c
++++ b/drivers/bus/mhi/host/boot.c
+@@ -607,6 +607,16 @@ void mhi_fw_load_handler(struct mhi_controller *mhi_cntrl)
+ 	 * device transitioning into MHI READY state
+ 	 */
+ 	if (mhi_cntrl->fbc_download) {
++		/*
++		 * Some FW combine two separate ELF images (SBL + WLAN FW) in a single
++		 * file. Hence, check for the existence of the second ELF header after
++		 * SBL. If present, load the second image separately.
++		 */
++		if (!memcmp(fw_data + mhi_cntrl->sbl_size, ELFMAG, SELFMAG)) {
++			fw_data += mhi_cntrl->sbl_size;
++			fw_sz -= mhi_cntrl->sbl_size;
++		}
++
+ 		ret = mhi_alloc_bhie_table(mhi_cntrl, &mhi_cntrl->fbc_image, fw_sz,
+ 					   IMG_TYPE_FBC);
+ 		if (ret) {
+-- 
+2.34.1
+
