@@ -1,0 +1,36 @@
+From 1d73e5dfcc386a4e8de55ddaa3493c4aa0b8d601 Mon Sep 17 00:00:00 2001
+From: Ananya Ghosh <ananghos@qti.qualcomm.com>
+Date: Thu, 18 Jun 2026 13:00:28 +0530
+Subject: [PATCH] drivers: soc: qcom: ice: Check ICE availability before
+ creating instance
+
+Call ops->available() callback in qcom_ice_create() to verify ICE
+functionality is supported. Return NULL if unavailable, allowing
+system to boot without ICE support.
+
+Change-Id: I03cdad387a0a942a64efbecd3707e103cafa2f63
+Signed-off-by: Ananya Ghosh <ananghos@qti.qualcomm.com>
+---
+ drivers/soc/qcom/ice.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/soc/qcom/ice.c b/drivers/soc/qcom/ice.c
+index 217f5cdef440..2d0895bff468 100644
+--- a/drivers/soc/qcom/ice.c
++++ b/drivers/soc/qcom/ice.c
+@@ -159,6 +159,12 @@ static struct qcom_ice *qcom_ice_create(struct device *dev,
+ 	if (!qcom_ice_ops_available())
+ 		return ERR_PTR(-EPROBE_DEFER);
+ 
++	/* Check if ICE functionality is actually available */
++	if (!qcom_ice_available()) {
++		dev_info(dev, "ICE functionality not available, skipping ICE initialization\n");
++		return NULL;
++	}
++
+ 	engine = devm_kzalloc(dev, sizeof(*engine), GFP_KERNEL);
+ 	if (!engine)
+ 		return ERR_PTR(-ENOMEM);
+-- 
+2.34.1
+

@@ -1,0 +1,94 @@
+From 53d663c6c88dcea16dbd3751af1e4354cee71abe Mon Sep 17 00:00:00 2001
+From: Poovendhan Selvaraj <poovendh@qti.qualcomm.com>
+Date: Thu, 7 May 2026 13:53:57 +0530
+Subject: [PATCH] ovl: fix dentry reference leak during cache pressure
+
+When the system is under memory pressure and drop_caches is triggered,
+the dcache shrinker can race with overlayfs inode destruction, leading
+to a WARNING in dput() due to incorrect reference counting.
+
+The issue occurs in the following scenario:
+
+1. drop_caches triggers aggressive dentry shrinking via prune_dcache_sb()
+2. shrink_dentry_list() processes dentries and calls __dentry_kill()
+3. This triggers ovl_destroy_inode() which calls ovl_stack_put()
+4. ovl_stack_put() calls dput() on lower dentries
+5. However, these dentries may have already been processed by the
+   shrinker, leading to dput() being called on dentries with
+   d_lockref.count already at 0
+
+The warning manifests as:
+  WARNING: CPU: 1 PID: 10953 at fs/dcache.c:794 dput+0xcc/0x2ac
+
+The root cause is that ovl_destroy_inode() unconditionally calls
+ovl_stack_put() on the lower stack, but doesn't account for the
+possibility that these dentries are being concurrently freed by
+the dcache shrinker.
+
+Change-Id: Ia31f5a0bdd501563b235d0a924e9e743612dfd0c
+Signed-off-by: Poovendhan Selvaraj <poovendh@qti.qualcomm.com>
+---
+ fs/overlayfs/super.c | 14 +++++++++++++-
+ fs/overlayfs/util.c  | 15 +++++++++++++--
+ 2 files changed, 26 insertions(+), 3 deletions(-)
+
+diff --git a/fs/overlayfs/super.c b/fs/overlayfs/super.c
+index 93ee57bc82ad..01151f6759a7 100644
+--- a/fs/overlayfs/super.c
++++ b/fs/overlayfs/super.c
+@@ -177,9 +177,21 @@ static void ovl_free_inode(struct inode *inode)
+ static void ovl_destroy_inode(struct inode *inode)
+ {
+ 	struct ovl_inode *oi = OVL_I(inode);
++	struct ovl_entry *oe = oi->oe;
+ 
+ 	dput(oi->__upperdentry);
+-	ovl_stack_put(ovl_lowerstack(oi->oe), ovl_numlower(oi->oe));
++
++	/*
++	 * During cache pressure, dentries in the lower stack may be
++	 * concurrently freed by the dcache shrinker. We need to ensure
++	 * we only put references we actually hold. The ovl_entry holds
++	 * references to lower dentries, so we can safely put them here.
++	 * However, we must check that the entry is still valid.
++	 */
++	if (oe && ovl_numlower(oe) > 0) {
++		ovl_stack_put(ovl_lowerstack(oe), ovl_numlower(oe));
++	}
++
+ 	if (S_ISDIR(inode->i_mode))
+ 		ovl_dir_cache_free(inode);
+ 	else
+diff --git a/fs/overlayfs/util.c b/fs/overlayfs/util.c
+index 0da1cd01d01c..5d221c993373 100644
+--- a/fs/overlayfs/util.c
++++ b/fs/overlayfs/util.c
+@@ -98,12 +98,23 @@ void ovl_stack_cpy(struct ovl_path *dst, struct ovl_path *src, unsigned int n)
+ 		dget(src[i].dentry);
+ }
+ 
++/*
++ * Release references to dentries in the overlay stack.
++ * This is called during inode destruction and must handle the case
++ * where dentries may be concurrently freed by the dcache shrinker.
++ */
+ void ovl_stack_put(struct ovl_path *stack, unsigned int n)
+ {
+ 	unsigned int i;
+ 
+-	for (i = 0; stack && i < n; i++)
+-		dput(stack[i].dentry);
++	for (i = 0; stack && i < n; i++) {
++		struct dentry *dentry = stack[i].dentry;
++
++		if (WARN_ON(IS_ERR(dentry)))
++			continue;
++		if (dentry)
++			dput(dentry);
++	}
+ }
+ 
+ void ovl_stack_free(struct ovl_path *stack, unsigned int n)
+-- 
+2.34.1
+

@@ -1,0 +1,75 @@
+--- a/modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js
++++ b/modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js
+@@ -331,14 +331,29 @@
+ 				);
+ 			});
+ 
++			/* Orangeyoo: on a single-wiphy multi-radio device (QSDK ath12k, one
++			 * phy for all three QCN9224 cards) iwinfo reports every band for
++			 * every radio, so the 2.4 GHz radio offered 5/6 GHz and "AC" mode,
++			 * and picking AC silently saved band=5g on 2.4 GHz hardware. The
++			 * wifi detect script records each radio's real channel range in
++			 * 'channels'; keep only the band that range belongs to. */
++			const hwband = this.getRadioBand(section_id);
++			if (hwband)
++				for (const b in this.channels)
++					if (b != hwband)
++						this.channels[b] = [];
++
+ 			const hwmodelist = L.toArray(wifidevs ? wifidevs.getHWModes() : null)
+ 				.reduce(function(o, v) { o[v] = true; return o; }, {});
+ 
++			// Legacy and N do not exist on 6 GHz
++			const legacy_band = this.channels['2g'].length > 3 || this.channels['5g'].length > 3;
++
+ 			// Define supported modes
+ 			this.modes = [
+-				'', 'Legacy', { available: hwmodelist.a || hwmodelist.b || hwmodelist.g },
+-				'n', 'N', { available: hwmodelist.n },
+-				'ac', 'AC', { available: L.hasSystemFeature('hostapd', '11ac') && hwmodelist.ac },
++				'', 'Legacy', { available: (hwmodelist.a || hwmodelist.b || hwmodelist.g) && legacy_band },
++				'n', 'N', { available: hwmodelist.n && legacy_band },
++				'ac', 'AC', { available: L.hasSystemFeature('hostapd', '11ac') && hwmodelist.ac && this.channels['5g'].length > 3 },
+ 				'ax', 'AX', { available: L.hasSystemFeature('hostapd', '11ax') && hwmodelist.ax },
+ 				'be', 'BE', { available: L.hasSystemFeature('hostapd', '11be') && hwmodelist.be }
+ 			];
+@@ -387,7 +402,7 @@
+ 					'5g', '5 GHz', { available: this.channels['5g'].length > 3 }
+ 				],
+ 				'ac': [
+-					'5g', '5 GHz', { available: true }
++					'5g', '5 GHz', { available: this.channels['5g'].length > 3 }
+ 				],
+ 				'ax': [
+ 					'2g', '2.4 GHz', { available: this.channels['2g'].length > 3 },
+@@ -403,6 +418,30 @@
+ 		}, this));
+ 	},
+ 
++	// Hardware band of a multi-radio section, from the channel range the
++	// wifi detect script stored in 'channels' (e.g. 1-11, 36-165, 1-233).
++	getRadioBand: function(section_id) {
++		if (uci.get('wireless', section_id, 'radio') == null)
++			return null;
++
++		const nums = String(uci.get('wireless', section_id, 'channels') ?? '')
++			.split(/[^0-9]+/).filter(n => n.length).map(n => +n);
++
++		if (!nums.length)
++			return null;
++
++		const lo = Math.min(...nums), hi = Math.max(...nums);
++
++		if (hi <= 14)
++			return '2g';
++		if (lo >= 32 && hi <= 177)
++			return '5g';
++		if (hi > 177)
++			return '6g';
++
++		return null;
++	},
++
+ 	// Set values in the select element
+ 	setValues: function(sel, vals) {
+ 		if (sel.vals)

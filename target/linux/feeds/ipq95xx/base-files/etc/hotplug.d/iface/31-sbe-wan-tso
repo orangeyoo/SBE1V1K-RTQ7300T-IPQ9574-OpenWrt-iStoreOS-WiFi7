@@ -1,0 +1,20 @@
+#!/bin/sh
+# SBE1V1K: keep segmentation offload off on the WAN (eth1, nss-dp).
+# With TSO/SG on, router-terminated TCP can wedge the 2.5G TX queue after
+# hours (see sbe-10g-offload). The nss-dp driver turns TSO/SG back on about
+# 3 s after the boot-time ethtool call, while the port is reconfigured
+# (traced 2026-11-22: off at 10 s, on at 24 s, no ethtool -K call in
+# between). Re-apply it a few seconds after the WAN interface comes up.
+[ "$ACTION" = ifup ] || exit 0
+case "$INTERFACE" in
+	wan|wan6) ;;
+	*) exit 0 ;;
+esac
+[ -e /sys/class/net/eth1 ] || exit 0
+(
+	sleep 5
+	ethtool -k eth1 2>/dev/null | grep -q -E '^(tcp-segmentation-offload|scatter-gather): on' || exit 0
+	ethtool -K eth1 tso off gso off sg off 2>/dev/null
+	logger -t sbe-wan-tso "eth1: TSO/SG were re-enabled by the driver, turned off again"
+) >/dev/null 2>&1 &
+exit 0

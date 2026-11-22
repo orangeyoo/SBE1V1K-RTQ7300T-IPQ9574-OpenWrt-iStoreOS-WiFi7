@@ -1,0 +1,34 @@
+From 1fb06c0e1bc0d3edacda46766ceae1c21d0995fb Mon Sep 17 00:00:00 2001
+From: Manikanta Mylavarapu <mmanikan@qti.qualcomm.com>
+Date: Mon, 18 May 2026 11:59:58 +0530
+Subject: [PATCH] pcie: qcom: Add PERST# deassert during link recovery
+
+During link recovery, the endpoint expects the PERST#
+signal to be deasserted in order to exit its wait state.
+Once PERST# is deasserted, the endpoint proceeds with
+link retraining and brings the link back up during
+host_init().
+
+Change-Id: I42525e81a83b0e46efc52ae9070bbede056e000a
+Signed-off-by: Manikanta Mylavarapu <mmanikan@qti.qualcomm.com>
+---
+ drivers/pci/controller/dwc/pcie-qcom.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/pci/controller/dwc/pcie-qcom.c b/drivers/pci/controller/dwc/pcie-qcom.c
+index e9cabd17fca0..eba30dc043ea 100644
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -1923,6 +1923,9 @@ static int qcom_pcie_reset_slot(struct pci_host_bridge *bridge,
+ 
+ 	qcom_pcie_host_deinit(pp);
+ 
++	/* De-assert perst gpio */
++	qcom_ep_reset_deassert(pcie);
++
+ 	ret = qcom_pcie_host_init(pp);
+ 	if (ret) {
+ 		dev_err(dev, "Host init failed\n");
+-- 
+2.34.1
+

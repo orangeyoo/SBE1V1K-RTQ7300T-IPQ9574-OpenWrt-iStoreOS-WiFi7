@@ -1,0 +1,61 @@
+#!/bin/sh /etc/rc.common
+# Wiro SBE1V1K: endpoint offload feature defaults (ported verbatim from
+# Orangeyoo 1.0 /etc/init.d/sbe-10g-offload).
+# Only enable features explicitly supported by the running driver.
+# All four ports: the 1.0 original listed eth0/eth3 only, so the 2.5G WAN
+# (eth1) and the second 1G port (eth2) ran without GSO.
+START=15
+USE_PROCD=1
+EXTRA_COMMANDS="recheck"
+EXTRA_HELP="	recheck	Re-enable GSO on LAN ports where boot turned it off"
+
+# WAN (eth1) gets no segmentation offload: with TSO on, router-terminated TCP
+# (OpenClash, iStore downloads) put TSO/fraglist frames on the 2.5G nss-dp
+# port, some went out oversized (tx_pkt1519tox > 0 at MTU 1500) and the TX
+# queue wedged for good after hours (tx_packets frozen, tx_dropped rising;
+# seen 2026-11-19 and 11-20). The 1.0 original never enabled it on eth1.
+apply() {
+    command -v ethtool >/dev/null 2>&1 || return 0
+    for dev in eth0 eth2 eth3; do
+        [ -e "/sys/class/net/$dev" ] || continue
+        ethtool -K "$dev" gro on gso on tso on 2>/dev/null || true
+    done
+    [ -e /sys/class/net/eth1 ] && ethtool -K eth1 gro on tso off gso off sg off 2>/dev/null || true
+}
+
+# LAN GSO may need a late re-check. Run it as a one-shot procd instance.
+# The WAN is never touched here (see apply).
+recheck() {
+    local delay dev
+    for delay in 60 60 60 120; do
+        sleep $delay
+        for dev in eth0 eth2 eth3; do
+            [ -e "/sys/class/net/$dev" ] || continue
+            ethtool -k "$dev" 2>/dev/null | grep -q '^generic-segmentation-offload: off' || continue
+            logger -t sbe-offload "$dev: GSO was off, re-enabling"
+            ethtool -K "$dev" gso on 2>/dev/null || true
+        done
+    done
+}
+
+# turboacc shipped bbr_cca=1 up to 1.0-rc4 and its init script forces
+# tcp_congestion_control from it, overriding 13-sbe-tcp-cubic.conf. BBR
+# cut router-terminated Wi-Fi TCP to about a third (see sysctl file).
+# Switch the old default off once; a later user choice is kept.
+cca_migrate() {
+    [ -e /etc/sbe-tcp-cubic-v1 ] && return 0
+    if [ "$(uci -q get turboacc.config.bbr_cca)" = 1 ]; then
+        uci set turboacc.config.bbr_cca=0
+        uci commit turboacc
+        logger -t sbe-offload "turboacc bbr_cca 1 -> 0 (CUBIC default)"
+    fi
+    touch /etc/sbe-tcp-cubic-v1
+}
+
+start_service() {
+    cca_migrate
+    apply
+    procd_open_instance gso-recheck
+    procd_set_param command /etc/init.d/sbe-10g-offload recheck
+    procd_close_instance
+}

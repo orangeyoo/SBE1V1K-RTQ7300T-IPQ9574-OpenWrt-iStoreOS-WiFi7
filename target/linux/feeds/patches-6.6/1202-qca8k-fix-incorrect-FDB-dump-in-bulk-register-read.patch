@@ -1,0 +1,46 @@
+From 76a6508744d56bb0881a0454bebd63df642b039d Mon Sep 17 00:00:00 2001
+From: qiangqiang cheng <qiangqia@qti.qualcomm.com>
+Date: Thu, 2 Jul 2026 16:53:42 +0800
+Subject: [PATCH] qca8k: fix incorrect FDB dump in bulk register read
+
+qca8k_bulk_read() is the regmap bus .read handler and reads 'count'
+consecutive 32-bit registers into val_buf. It indexed the destination
+with 'val_buf + i', but val_buf is a void *, so the pointer advanced by
+one byte per iteration instead of sizeof(u32). Every register after the
+first therefore overwrote bytes 1-3 of the previous value, corrupting
+all values beyond the first and producing incorrect FDB dumps.
+
+Use a typed u32 *val pointer and increment it in the loop so it advances
+by sizeof(u32), matching the reg increment and the already-correct
+qca8k_bulk_gather_write() handler.
+
+Change-Id: Ia8a6607bc1295fedfa276191bb5b597ae239bf65
+Signed-off-by: qiangqiang cheng <qiangqia@qti.qualcomm.com>
+---
+ drivers/net/dsa/qca/qca8k-8xxx.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/dsa/qca/qca8k-8xxx.c b/drivers/net/dsa/qca/qca8k-8xxx.c
+index ae4b1548686a..903695c8c645 100644
+--- a/drivers/net/dsa/qca/qca8k-8xxx.c
++++ b/drivers/net/dsa/qca/qca8k-8xxx.c
+@@ -473,10 +473,13 @@ qca8k_bulk_read(void *ctx, const void *reg_buf, size_t reg_len,
+ 	int i, count = val_len / sizeof(u32), ret;
+ 	struct qca8k_priv *priv = ctx;
+ 	u32 reg = *(u16 *)reg_buf;
++	u32 *val = val_buf;
+ 
+-	/* loop count times and increment reg of 4 */
+-	for (i = 0; i < count; i++, reg += sizeof(u32)) {
+-		ret = qca8k_read_mii(priv, reg, val_buf + i);
++	/* loop count times, increment reg of 4 and increment val ptr to
++	 * the next value
++	 */
++	for (i = 0; i < count; i++, reg += sizeof(u32), val++) {
++		ret = qca8k_read_mii(priv, reg, val);
+ 		if (ret < 0)
+ 			return ret;
+ 	}
+-- 
+2.34.1
+

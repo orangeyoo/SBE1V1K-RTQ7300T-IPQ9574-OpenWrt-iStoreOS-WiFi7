@@ -1,0 +1,8 @@
+# Orangeyoo 2.0 baseline: LAN DHCP at the 30.1 anchor (plan acceptance).
+uci -q set network.lan.ipaddr='192.168.30.1'
+uci -q set network.lan.netmask='255.255.255.0'
+# AP bridge: no STP - wifi VAP ports forward immediately on association
+# (with STP the VAP sits in the state machine for tens of seconds and
+# first-association DHCP requests are dropped -> 'wifi unusable').
+uci -q set network.@device[0].stp='0'
+uci commit network

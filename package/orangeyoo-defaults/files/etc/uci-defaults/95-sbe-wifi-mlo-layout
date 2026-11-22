@@ -1,0 +1,46 @@
+#!/bin/sh
+# SBE1V1K: ath12k runs the three QCN9224 as one MLO group again (single
+# wiphy phy00, radios radio0_band0/1/2 on the first chip's path with a
+# radio index). 1.0 development images in between ran them ungrouped and
+# moved the wireless config to one device per chip (radio0/1/2 on each
+# chip's own path). Move such a config back, keeping every option.
+
+P0='soc@0/10000000.pci/pci0001:00/0001:00:00.0/0001:01:00.0'
+
+for old in radio0 radio1 radio2; do
+	[ "$(uci -q get wireless.$old)" = wifi-device ] || continue
+	case "$(uci -q get wireless.$old.band)" in
+	2g) n=0 ;;
+	5g) n=1 ;;
+	6g) n=2 ;;
+	*) continue ;;
+	esac
+	new=radio0_band$n
+	uci -q get wireless.$new >/dev/null && continue
+
+	uci rename wireless.$old=$new
+	uci set wireless.$new.path="$P0"
+	uci set wireless.$new.radio="$n"
+
+	for s in $(uci -q show wireless | sed -n "s/^wireless\.\([^.]*\)\.device='$old'$/\1/p"); do
+		uci set wireless.$s.device=$new
+		for o in ifname owe_transition_ifname; do
+			case "$(uci -q get wireless.$s.$o)" in
+			*-open) uci set wireless.$s.$o="phy00.$n-0" ;;
+			*-owe) uci set wireless.$s.$o="phy00.$n-1" ;;
+			phy0?-*) uci delete wireless.$s.$o ;;
+			esac
+		done
+		case "$s" in
+		default_$old|owe_$old)
+			uci -q get wireless.${s%_$old}_$new >/dev/null ||
+				uci rename wireless.$s=${s%_$old}_$new ;;
+		esac
+	done
+	changed=1
+done
+
+[ -n "$changed" ] || exit 0
+uci commit wireless
+logger -t sbe-wifi "wireless config moved back to the MLO layout (radio0_band0/1/2)"
+exit 0

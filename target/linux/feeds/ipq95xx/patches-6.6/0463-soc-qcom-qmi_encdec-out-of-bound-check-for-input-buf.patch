@@ -1,0 +1,239 @@
+From f288183709698c0984576c1ccef3736f762e817c Mon Sep 17 00:00:00 2001
+From: Saahil Tomar <quic_saahtoma@quicinc.com>
+Date: Wed, 18 Oct 2023 21:07:28 +0530
+Subject: [PATCH 468/500] soc: qcom: qmi_encdec: out of bound check for input
+ buffer
+
+Data shared by remote processors can not be trusted.
+QMI message could be malformed which can result in decoded
+bytes greater than length of input buffer supplied causing
+buffer overflow.
+
+Check decoded bytes against buffer length to avoid buffer
+overflow.
+
+Change-Id: I1d2d3aadd297718b8ecc023a20475b60f4bce022
+Signed-off-by: Deepak Kumar Singh <quic_deesin@quicinc.com>
+Signed-off-by: Saahil Tomar <quic_saahtoma@quicinc.com>
+---
+ drivers/soc/qcom/qmi_encdec.c | 51 ++++++++++++++++++++++++++++-------
+ 1 file changed, 42 insertions(+), 9 deletions(-)
+
+Index: linux-6.6.116/drivers/soc/qcom/qmi_encdec.c
+===================================================================
+--- linux-6.6.116.orig/drivers/soc/qcom/qmi_encdec.c	2026-01-27 12:03:46.756603238 +0530
++++ linux-6.6.116/drivers/soc/qcom/qmi_encdec.c	2026-01-27 12:22:50.563529020 +0530
+@@ -475,6 +475,7 @@
+  * @buf_src: Buffer containing the elements in QMI wire format.
+  * @elem_len: Number of elements to be decoded.
+  * @elem_size: Size of a single instance of the element to be decoded.
++ * @src_len: Source buffer length.
+  *
+  * This function decodes the "elem_len" number of elements in QMI wire format,
+  * each of size "elem_size" bytes from the source buffer "buf_src" and stores
+@@ -485,10 +486,13 @@
+  * Return: The total size of the decoded data elements, in bytes.
+  */
+ static int qmi_decode_basic_elem(void *buf_dst, const void *buf_src,
+-				 u32 elem_len, u32 elem_size)
++				 u32 elem_len, u32 elem_size, u32 src_len)
+ {
+ 	u32 i, rc = 0;
+ 
++	if (elem_len * elem_size > src_len)
++		return -EINVAL;
++
+ 	for (i = 0; i < elem_len; i++) {
+ 		QMI_ENCDEC_DECODE_N_BYTES(buf_dst, buf_src, elem_size);
+ 		rc += elem_size;
+@@ -506,6 +510,7 @@
+  * @tlv_len: Total size of the encoded information corresponding to
+  *           this struct element.
+  * @dec_level: Depth of the nested structure from the main structure.
++ * @src_len: Source buffer length.
+  *
+  * This function decodes the "elem_len" number of elements in QMI wire format,
+  * each of size "(tlv_len/elem_len)" bytes from the source buffer "buf_src"
+@@ -519,16 +524,20 @@
+ static int qmi_decode_struct_elem(const struct qmi_elem_info *ei_array,
+ 				  void *buf_dst, const void *buf_src,
+ 				  u32 elem_len, u32 tlv_len,
+-				  int dec_level)
++				  int dec_level, u32 src_len)
+ {
+ 	int i, rc, decoded_bytes = 0;
+ 	const struct qmi_elem_info *temp_ei = ei_array;
+ 
++	if (tlv_len > src_len)
++		return -EINVAL;
++
+ 	for (i = 0; i < elem_len && decoded_bytes < tlv_len; i++) {
+ 		rc = qmi_decode(temp_ei->ei_array, buf_dst, buf_src,
+ 				tlv_len - decoded_bytes, dec_level);
+ 		if (rc < 0)
+ 			return rc;
++
+ 		buf_src = buf_src + rc;
+ 		buf_dst = buf_dst + temp_ei->elem_size;
+ 		decoded_bytes += rc;
+@@ -553,6 +562,7 @@
+  * @tlv_len: Total size of the encoded information corresponding to
+  *           this string element.
+  * @dec_level: Depth of the string element from the main structure.
++ * @src_len: Source buffer length.
+  *
+  * This function decodes the string element of maximum length
+  * "ei_array->elem_len" from the source buffer "buf_src" and puts it into
+@@ -564,12 +574,12 @@
+  */
+ static int qmi_decode_string_elem(const struct qmi_elem_info *ei_array,
+ 				  void *buf_dst, const void *buf_src,
+-				  u32 tlv_len, int dec_level)
++				  u32 tlv_len, int dec_level, u32 src_len)
+ {
+ 	int rc;
+ 	int decoded_bytes = 0;
+-	u16 string_len = 0;
+-	u16 string_len_sz = 0;
++	u32 string_len = 0;
++	u32 string_len_sz = 0;
+ 	const struct qmi_elem_info *temp_ei = ei_array;
+ 	u8 val8;
+ 	u16 val16;
+@@ -581,14 +591,16 @@
+ 				sizeof(u8) : sizeof(u16);
+ 		if (string_len_sz == sizeof(u8)) {
+ 			rc = qmi_decode_basic_elem(&val8, buf_src,
+-						   1, string_len_sz);
++						   1, string_len_sz, src_len);
+ 			string_len = (u32)val8;
+ 		} else {
+ 			rc = qmi_decode_basic_elem(&val16, buf_src,
+-						   1, string_len_sz);
++						   1, string_len_sz, src_len);
+ 			string_len = (u32)val16;
+-			string_len = le16_to_cpu(string_len);
+ 		}
++		if (rc < 0)
++			return rc;
++
+ 		decoded_bytes += rc;
+ 	}
+ 
+@@ -603,7 +615,11 @@
+ 	}
+ 
+ 	rc = qmi_decode_basic_elem(buf_dst, buf_src + decoded_bytes,
+-				   string_len, temp_ei->elem_size);
++				   string_len, temp_ei->elem_size,
++				   src_len - decoded_bytes);
++	if (rc < 0)
++		return rc;
++
+ 	*((char *)buf_dst + string_len) = '\0';
+ 	decoded_bytes += rc;
+ 
+@@ -662,7 +678,6 @@
+ 	u32 decoded_bytes = 0;
+ 	const void *buf_src = in_buf;
+ 	int rc;
+-	char *d;
+ 	u8 val8;
+ 	u16 val16;
+ 	u32 val32;
+@@ -673,6 +688,9 @@
+ 
+ 		if (dec_level == 1) {
+ 			tlv_pointer = buf_src;
++			if (decoded_bytes + TLV_TYPE_SIZE + TLV_LEN_SIZE > in_buf_len)
++				return -EINVAL;
++
+ 			QMI_ENCDEC_DECODE_TLV(&tlv_type,
+ 					      &tlv_len, tlv_pointer);
+ 			buf_src += (TLV_TYPE_SIZE + TLV_LEN_SIZE);
+@@ -702,30 +720,21 @@
+ 		}
+ 
+ 		if (temp_ei->data_type == QMI_DATA_LEN) {
+-			data_len_value = 0;
+ 			data_len_sz = temp_ei->elem_size == sizeof(u8) ?
+ 					sizeof(u8) : sizeof(u16);
+ 			if (data_len_sz == sizeof(u8)) {
+ 				rc = qmi_decode_basic_elem(&val8, buf_src,
+-							   1, data_len_sz);
++							   1, data_len_sz,
++							   in_buf_len - decoded_bytes);
+ 				data_len_value = (u32)val8;
+ 			} else {
+ 				rc = qmi_decode_basic_elem(&val16, buf_src,
+-							   1, data_len_sz);
++							   1, data_len_sz,
++							   in_buf_len - decoded_bytes);
+ 				data_len_value = (u32)val16;
+ 			}
+-			if (IS_ENABLED(CONFIG_CPU_BIG_ENDIAN)) {
+-				d = (char *)&data_len_value;
+-				if (temp_ei->elem_size == 1) {
+-					d[3] = d[0];
+-					d[0] = d[1] = d[2] = 0;
+-				}
+-				if (temp_ei->elem_size == 2) {
+-					d[2] = d[0];
+-					d[3] = d[1];
+-					d[0] = d[1] = 0;
+-				}
+-			}
++			if (rc < 0)
++				return rc;
+ 			val32 = cpu_to_le32(data_len_value);
+ 			memcpy(buf_dst, &val32, sizeof(u32));
+ 			temp_ei = temp_ei + 1;
+@@ -753,24 +762,32 @@
+ 		case QMI_SIGNED_4_BYTE_ENUM:
+ 			rc = qmi_decode_basic_elem(buf_dst, buf_src,
+ 						   data_len_value,
+-						   temp_ei->elem_size);
++						   temp_ei->elem_size,
++						   in_buf_len - decoded_bytes);
++			if (rc < 0)
++				return rc;
++
+ 			UPDATE_DECODE_VARIABLES(buf_src, decoded_bytes, rc);
+ 			break;
+ 
+ 		case QMI_STRUCT:
+ 			rc = qmi_decode_struct_elem(temp_ei, buf_dst, buf_src,
+ 						    data_len_value, tlv_len,
+-						    dec_level + 1);
++						    dec_level + 1,
++						    in_buf_len - decoded_bytes);
+ 			if (rc < 0)
+ 				return rc;
++
+ 			UPDATE_DECODE_VARIABLES(buf_src, decoded_bytes, rc);
+ 			break;
+ 
+ 		case QMI_STRING:
+ 			rc = qmi_decode_string_elem(temp_ei, buf_dst, buf_src,
+-						    tlv_len, dec_level);
++						    tlv_len, dec_level,
++						    in_buf_len - decoded_bytes);
+ 			if (rc < 0)
+ 				return rc;
++
+ 			UPDATE_DECODE_VARIABLES(buf_src, decoded_bytes, rc);
+ 			break;
+ 
+@@ -829,9 +846,9 @@
+ 
+ 	hdr = msg;
+ 	hdr->type = type;
+-	hdr->txn_id = cpu_to_le16(txn_id);
+-	hdr->msg_id = cpu_to_le16(msg_id);
+-	hdr->msg_len = cpu_to_le16(msglen);
++	hdr->txn_id = txn_id;
++	hdr->msg_id = msg_id;
++	hdr->msg_len = msglen;
+ 
+ 	*len = sizeof(*hdr) + msglen;
+ 

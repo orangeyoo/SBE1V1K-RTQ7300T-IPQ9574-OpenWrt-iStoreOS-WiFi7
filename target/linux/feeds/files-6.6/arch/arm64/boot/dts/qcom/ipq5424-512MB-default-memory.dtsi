@@ -1,0 +1,161 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * IPQ5424 512MB Memory device tree source
+ *
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ */
+
+/ {
+	/*                    512MB Profile
+	 * +==========+==============+========================+
+	 * |         |              |                         |
+	 * |  Region | Start Offset |          Size           |
+	 * |         |              |                         |
+	 * +---------+--------------+-------------------------+
+	 * |         |              |                         |
+	 * |   WLAN  |              |                         |
+	 * |    Q6   |  0x8a900000  |          34MB           |
+	 * |         |              |                         |
+	 * +---------+--------------+-------------------------+
+	 * |         |              |                         |
+	 * | IPQ5424 |              |                         |
+	 * | M3 Dump |  0x8cd00000  |           1MB           |
+	 * |         |              |                         |
+	 * +---------+--------------+-------------------------+
+	 * |         |              |                         |
+	 * | IPQ5424 |              |                         |
+	 * |  QDSS   |  0x8ce00000  |           1MB           |
+	 * |         |              |                         |
+	 * +---------+--------------+-------------------------+
+	 * |         |              |                         |
+	 * | IPQ5424 |              |                         |
+	 * |  CALDB  |  0x8cf00000  |           6MB           |
+	 * |         |              |                         |
+	 * +---------+--------------+-------------------------+
+	 * |         |              |                         |
+	 * | QCN9224 |  0x8d500000  |          27MB           |
+	 * | PCIE0   |              |                         |
+	 * |         |              |                         |
+	 * +---------+--------------+-------------------------+
+	 * |         |              |                         |
+	 * | QCN9224 |  0x8f000000  |          27MB           |
+	 * | PCIE1   |              |                         |
+	 * |         |              |                         |
+	 * +---------+--------------+-------------------------+
+	 * |         |              |                         |
+	 * | QCN9224 |  0x90b00000  |          27MB           |
+	 * | PCIE2   |              |                         |
+	 * |         |              |                         |
+	 * +---------+--------------+-------------------------+
+	 * |         |              |                         |
+	 * | QCN9224 |  0x92600000  |          27MB           |
+	 * | PCIE3   |              |                         |
+	 * |         |              |                         |
+	 * +---------+--------------+-------------------------+
+	 * |         |              |                         |
+	 * |  MHI0   |    DYNAMIC   |          9MB            |
+	 * |         |              |                         |
+	 * +---------+--------------+-------------------------+
+	 * |         |              |                         |
+	 * |  MHI1   |    DYNAMIC   |          9MB            |
+	 * |         |              |                         |
+	 * +---------+--------------+-------------------------+
+	 * |         |              |                         |
+	 * |  MHI2   |    DYNAMIC   |          9MB            |
+	 * |         |              |                         |
+	 * +---------+--------------+-------------------------+
+	 * |         |              |                         |
+	 * |  MHI3   |    DYNAMIC   |          9MB            |
+	 * |         |              |                         |
+	 * +---------+--------------+-------------------------+
+	 * |         |              |                         |
+	 * |  MLO    |    DYNAMIC   |          18MB           |
+	 * |         |              |                         |
+	 * +==================================================+
+	 * |                                                  |
+	 * |                                                  |
+	 * |                                                  |
+	 * |             Rest of memory for Linux             |
+	 * |                                                  |
+	 * |                                                  |
+	 * |                                                  |
+	 * +==================================================+
+	 */
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		q6_region: wcnss@8a900000 {
+			no-map;
+			reg = <0x0 0x8a900000 0x0 0xa00000>;
+		};
+
+		q6_ipq5424_data: q6_ipq5424_data@8b240000 {
+			no-map;
+			reg = <0x0 0x8b300000 0x0 0x2200000>;
+		};
+
+		qcn9224_pcie0: qcn9224_pcie0@8d500000 {
+			no-map;
+			reg = <0x0 0x8d500000 0x0 0x01B00000>;
+			status = "disabled";
+		};
+
+		qcn9224_pcie1: qcn9224_pcie1@8f000000 {
+			no-map;
+			reg = <0x0 0x8f000000 0x0 0x01B00000>;
+			status = "disabled";
+		};
+
+		qcn9224_pcie2: qcn9224_pcie2@90b00000 {
+			no-map;
+			reg = <0x0 0x90b00000 0x0 0x01B00000>;
+			status = "disabled";
+		};
+
+		qcn9224_pcie3: qcn9224_pcie3@92600000 {
+			no-map;
+			reg = <0x0 0x92600000 0x0 0x01B00000>;
+			status = "disabled";
+		};
+
+		mhi_region0: dma_pool0@0 {
+			compatible = "shared-dma-pool";
+			no-map;
+			size = <0x0 0x00900000>;
+			alignment = <0x0 0x1000>;
+			status = "disabled";
+		};
+
+		mhi_region1: dma_pool1@1 {
+			compatible = "shared-dma-pool";
+			no-map;
+			size = <0x0 0x00900000>;
+			alignment = <0x0 0x1000>;
+			status = "disabled";
+		};
+
+		mhi_region2: dma_pool2@2 {
+			compatible = "shared-dma-pool";
+			no-map;
+			size = <0x0 0x00900000>;
+			alignment = <0x0 0x1000>;
+			status = "disabled";
+		};
+
+		mhi_region3: dma_pool3@3 {
+			compatible = "shared-dma-pool";
+			no-map;
+			size = <0x0 0x00900000>;
+			alignment = <0x0 0x1000>;
+			status = "disabled";
+		};
+
+		mlo_global_mem0: mlo_global_mem_0@0 {
+			no-map;
+			reg = <0x0 0x96e00000 0x0 0x1200000>;
+			status = "disabled";
+		};
+	};
+};

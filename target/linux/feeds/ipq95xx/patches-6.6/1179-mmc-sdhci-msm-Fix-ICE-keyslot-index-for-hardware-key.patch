@@ -1,0 +1,78 @@
+From e31f293e10edd61fb0266da7441ac080511143df Mon Sep 17 00:00:00 2001
+From: Md Sadre Alam <mdalam@qti.qualcomm.com>
+Date: Sat, 23 May 2026 11:30:51 +0530
+Subject: [PATCH] mmc: sdhci-msm: Fix ICE keyslot index for hardware key
+ operations
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+When using hardware key slots with Inline Crypto Engine (ICE),
+the driver was incorrectly passing software keyslot indices directly
+to the hardware, causing timeout errors during dm-crypt operations.
+
+The block crypto layer manages a pool of 32 software keyslots (indices 0-31)
+for inline encryption. When dm-crypt creates encrypted device mappings,
+it allocates keyslots sequentially:
+
+1. blk_crypto_get_keyslot() is called for each new mapping
+2. An idle slot is selected from the software keyslot pool
+3. blk_crypto_keyslot_index() returns the slot index (0, 1, 2, 3...)
+4. This index is stored in mrq->crypto_key_slot
+5. The index is passed down to the MMC driver for hardware programming
+
+For multiple dm-crypt mappings:
+- First mapping  → software slot 0
+- Second mapping → software slot 1
+- Third mapping  → software slot 2
+- And so on...
+
+The Problem is Qualcomm ICE hardware has only 2 hardware keyslots
+(indices 0-1) for hardware-wrapped keys managed by TEE/SCM. The block
+crypto layer is unaware of this hardware limitation and continues allocating
+software slots beyond index 1.
+
+When the driver receives mrq->crypto_key_slot = 2 (or higher), it
+attempts to program ICE hardware slot 2, which doesn't exist, causing:
+
+  mmc0: Timeout waiting for hardware interrupt
+  device-mapper: remove ioctl on test-crypt failed: Resource busy
+
+The issue manifests when creating multiple dm-crypt mappings or when
+keyslots are reused after eviction.
+
+To Fix this add a check for cq_host->use_hwkey in sdhci_msm_ice_cfg().
+When using hardware-wrapped keys, always force the keyslot index to 0,
+regardless of the software slot index allocated by the block crypto layer.
+
+This ensures that:
+1. Software keyslot management continues normally in block crypto layer
+2. Hardware operations always use valid ICE hardware slot 0
+3. Multiple dm-crypt mappings work correctly with hardware keys
+
+The software keyslot index is still used for key lookup and management
+in the block crypto layer, but the hardware programming uses the fixed
+hardware slot index.
+
+Change-Id: I76d886efbca16056e7b8efd1d520438421e2775d
+Signed-off-by: Md Sadre Alam <mdalam@qti.qualcomm.com>
+---
+ drivers/mmc/host/sdhci-msm.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/mmc/host/sdhci-msm.c b/drivers/mmc/host/sdhci-msm.c
+index b15a80acaab0..c96fe30c1f3c 100644
+--- a/drivers/mmc/host/sdhci-msm.c
++++ b/drivers/mmc/host/sdhci-msm.c
+@@ -1997,6 +1997,8 @@ static void sdhci_msm_ice_cfg(struct sdhci_host *host, struct mmc_request *mrq)
+ 		}
+ 
+ 		key_index = mrq->crypto_key_slot;
++		if (cq_host->use_hwkey)
++			key_index = 0;
+ 		crypto_params = FIELD_PREP(ICE_HCI_PARAM_CE, 1) |
+ 				FIELD_PREP(ICE_HCI_PARAM_CCI, key_index);
+ 
+-- 
+2.34.1
+

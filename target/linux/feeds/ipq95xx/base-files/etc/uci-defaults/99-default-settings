@@ -1,0 +1,12 @@
+#!/bin/sh
+# Wiro SBE1V1K safe defaults (ported from Orangeyoo 1.0 99-default-settings,
+# adapted: no iStore channel argon theme on the 2.0 tree - bootstrap only).
+uci -q set system.@system[0].hostname='SBE1V1K'
+uci -q set system.ntp.enable_server='1'
+uci -q set system.@system[0].timezone='CST-8'
+uci -q set system.@system[0].zonename='Asia/Shanghai'
+uci commit system
+uci -q set luci.main.mediaurlbase='/luci-static/bootstrap'
+uci commit luci
+rm -f /tmp/luci-modulecache/* /tmp/luci-indexcache* 2>/dev/null
+exit 0

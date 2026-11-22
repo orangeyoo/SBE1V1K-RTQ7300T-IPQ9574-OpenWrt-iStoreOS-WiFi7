@@ -1,0 +1,43 @@
+From: Orangeyoo <orangeyoo@wiro.local>
+Subject: [PATCH] docker, dockerd: no network access at build time
+
+Build/Prepare ran git-short-commit.sh, which fetches the release tag from
+github.com only to compare it with the PKG_GIT_SHORT_COMMIT already
+hard-coded in the Makefile. That makes the build depend on network state
+(it failed offline) and is not reproducible. The archive itself is still
+verified through PKG_HASH.
+---
+--- a/utils/docker/Makefile
++++ b/utils/docker/Makefile
+@@ -47,14 +47,6 @@
+ define Build/Prepare
+ 	$(Build/Prepare/Default)
+ 
+-	# Verify PKG_GIT_SHORT_COMMIT
+-	( \
+-		EXPECTED_PKG_GIT_SHORT_COMMIT=$$$$( $(CURDIR)/../dockerd/git-short-commit.sh '$(PKG_GIT_URL)' '$(PKG_GIT_REF)' '$(TMP_DIR)/git-short-commit/$(PKG_NAME)-$(PKG_VERSION)' ); \
+-		if [ "$$$${EXPECTED_PKG_GIT_SHORT_COMMIT}" != "$(strip $(PKG_GIT_SHORT_COMMIT))" ]; then \
+-			echo "ERROR: Expected 'PKG_GIT_SHORT_COMMIT:=$$$${EXPECTED_PKG_GIT_SHORT_COMMIT}', found 'PKG_GIT_SHORT_COMMIT:=$(strip $(PKG_GIT_SHORT_COMMIT))'"; \
+-			exit 1; \
+-		fi \
+-	)
+ endef
+ 
+ define Build/Compile
+--- a/utils/dockerd/Makefile
++++ b/utils/dockerd/Makefile
+@@ -108,14 +108,6 @@
+ 		fi \
+ 	)
+ 
+-	# Verify PKG_GIT_SHORT_COMMIT
+-	( \
+-		EXPECTED_PKG_GIT_SHORT_COMMIT=$$$$( $(CURDIR)/git-short-commit.sh '$(PKG_GIT_URL)' '$(PKG_GIT_REF)' '$(TMP_DIR)/git-short-commit/$(PKG_NAME)-$(PKG_VERSION)' ); \
+-		if [ "$$$${EXPECTED_PKG_GIT_SHORT_COMMIT}" != "$(strip $(PKG_GIT_SHORT_COMMIT))" ]; then \
+-			echo "ERROR: Expected 'PKG_GIT_SHORT_COMMIT:=$$$${EXPECTED_PKG_GIT_SHORT_COMMIT}', found 'PKG_GIT_SHORT_COMMIT:=$(strip $(PKG_GIT_SHORT_COMMIT))'"; \
+-			exit 1; \
+-		fi \
+-	)
+ endef
+ 
+ BUILDTAGS:=

@@ -1,0 +1,19 @@
+#!/bin/sh
+# Wiro SBE1V1K: the Wiro recovery-page clean only zero-fills + rebuilds the
+# GPT; it never formats P28, so fstools falls back to a volatile tmpfs
+# overlay and first-boot writes (password, wireless fixes) would not
+# survive reboot. If the running overlay is the tmpfs fallback and P28 has
+# no ext4 magic, format it once and reboot; every later boot is a no-op.
+ROOT_UPPER="$(grep -oE 'overlay.*upperdir=/tmp/root/upper' /proc/mounts | head -n1)"
+[ -n "$ROOT_UPPER" ] || exit 0
+DEV="$(grep -oE '/dev/mmcblk0p[0-9]+' /proc/cmdline | head -n1 | sed 's/p27$/p28/')"
+[ -b "$DEV" ] || exit 0
+MAGIC="$(dd if="$DEV" bs=1 skip=1080 count=2 2>/dev/null | hexdump -v -n 2 -e '1/1 "%.2x"')"
+if [ "$MAGIC" = "ef53" ]; then
+	logger -t o2-selfheal "overlay: $DEV already has ext4; formatting not needed"
+	exit 0
+fi
+logger -t o2-selfheal "overlay: tmpfs fallback with unformatted $DEV - formatting ext4 and rebooting once"
+mkfs.ext4 -F -L rootfs_data "$DEV" >/dev/null 2>&1 || exit 0
+sync
+reboot -f

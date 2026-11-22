@@ -1,0 +1,13 @@
+#!/bin/sh /etc/rc.common
+# SBE1V1K: Wi-Fi firmware recovery supervisor: re-joins an 802.11s mesh
+# after a firmware restart, reboots when a recovery hangs (see
+# /usr/sbin/sbe-wifi-watchdog).
+START=99
+USE_PROCD=1
+
+start_service() {
+	procd_open_instance
+	procd_set_param command /usr/sbin/sbe-wifi-watchdog
+	procd_set_param respawn
+	procd_close_instance
+}

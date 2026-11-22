@@ -1,0 +1,2005 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * Askey SBE1V1K (Askey model RTQ7300T, Qualcomm AP-AL02-C4 hardware family)
+ * Copyright (c) 2026 Orangeyoo <Orangeyoo@50848>
+ * board device tree source - Orangeyoo 2.0 QSDK14
+ *
+ * Author: Orangeyoo (board/radio evidence pass 2026-11-05, landed 2026-11-05)
+ *
+ * Landed as ipq9574-sbe1v1k.dts in the target/linux/feeds/ipq95xx files-6.6
+ * overlay (copied into the kernel build tree by Kernel/Patch/Default, built
+ * by "make dtbs" via the arch/arm64/boot/dts/qcom/Makefile registration and
+ * consumed by Device/orangeyoo_sbe1v1k in target/linux/feeds/ipq95xx/image/
+ * generic.mk, DEVICE_DTS = ipq9574-sbe1v1k).
+ *
+ * Evidence sources (all read-only analysis; every board fact below traces to one
+ * of these, cited inline as [OEM], [ART], [COMM], [REF], [BKUP]):
+ *  [OEM]  Vendor FDT of the Askey RTQ7300T (AP-AL02-C4 family), decompiled from
+ *         /work/oem-fdt-3560132.dtb (askey,rtq7300t-rev0),
+ *         /work/oem-fdt-3644048.dtb (rev1), /work/oem-fdt-3727952.dtb (rev2).
+ *         The three revisions differ only in: compatible string, an extra
+ *         RTL8261N reset GPIO (gpio41) present in the rev0 mdio reset list,
+ *         eMMC pin drive strengths (rev0/rev1), switch_mac_mode 0x0b (rev0/rev1)
+ *         vs 0x00 (rev2), and the emmc_pins block (dropped in rev2). WiFi/WSI/
+ *         PCIe/UART/DP sections are byte-identical across all three revisions.
+ *  [ART]  Factory ART partition p20 (1 MiB), extracted from
+ *         SBE1V1K-<WAN-MAC>-factory.tar (A-unit factory package). Contains
+ *         the 6-byte MAC table at 0x0 and three per-radio calibration blocks at
+ *         0x58800 / 0x8a800 / 0xbc800 (see "Calibration data" note below).
+ *  [COMM] Orangeyoo community tree, measured working on hardware:
+ *         target/linux/qualcommbe/dts/ipq9570-sbe1v1k.dts (OpenWrt-style,
+ *         kernel 6.x qcom_ppe port model) and
+ *         package/firmware/ipq-wifi/src/board-askey_sbe1v1k.qcn9274.
+ *  [REF]  QSDK14 reference board for the same AP-AL02-C4 family:
+ *         ipq9574-rdp433.dts + ipq9574.dtsi (files-6.6 overlay). The vendor FDT
+ *         [OEM] is a derivative of this reference: identical wifi boot-args and
+ *         identical per-radio ART caldata offsets (0x58800/0x8a800/0xbc800).
+ *  [BKUP] A-unit full-backup tar listing: 43 GPT partitions p01..p43 (names in
+ *         the eMMC partition comment below).
+ *
+ * Include context: written against the QSDK14 kernel-6.6 target overlay
+ * (ipq9574.dtsi, arch/arm64/boot/dts/qcom/). Not expected to compile without
+ * that tree; label references used: soc, tlmm, gcc, nsscc, tsens, pwm, mdio,
+ * ess_switch, usb3, pcie1_x1/pcie2_x2/pcie3_x2, pcie1_phy/pcie2_phy/pcie3_phy,
+ * wsi, blsp1_uart1/2/3, sdhc_1, rpm_requests.
+ *
+ * Calibration data / radio identity (R1 conclusion, from [ART] + [COMM]):
+ *   ART block 0x58800: calheader (tag 0x04040001, payload length 0xf800),
+ *     radio MAC 90:d3:cf:xx:xx:8e at +0x10 -> calibration variant Askey-SBE1V1K_1
+ *   ART block 0x8a800: payload length 0x19000, MAC ...:90 -> variant _4 (WSI
+ *     controller)
+ *   ART block 0xbc800: payload length 0x18800, MAC ...:8f -> variant _2
+ *   The community board-askey_sbe1v1k.qcn9274 board-2.bin BOARD data blobs match
+ *   these ART blocks byte-for-byte at 99.9% (63425/63488, 102290/102400,
+ *   100246/100352); the differences are: per-radio MAC replaced by placeholder
+ *   00:03:7f:12:34:56, a header checksum word (u32@0xc), and a handful of
+ *   per-chain tune/power fields. The ART blocks are the authoritative per-unit
+ *   calibration; the packaged board-2.bin is the firmware-facing equivalent.
+ *   ethaddr nvmem base = ART offset 0x0 = 90:d3:cf:xx:xx:91 (WAN per [OEM]
+ *   u-boot env "ethaddr"); LAN base (+1) = ...:92; radios derive base-3/-1/-2
+ *   = ...:8e/...:90/...:8f which equals the MACs stored inside the ART blocks.
+ *
+ * This draft deliberately does NOT carry device-unique MAC values - all MACs
+ * are nvmem-derived from the 0:ART partition.
+ *
+ * a10 DT audit revision (2026-11-05, /work/o2-staging/dts-fix-20261105):
+ *   FIX-M1 explicit 1 GiB DRAM window (both shipped FDTs carry it; the dtsi
+ *         ships reg size 0 and would boot blind if the APPSBL skips fixup)
+ *   FIX-M2 tzapp merges into the dtsi tzapp@0 node so &tzapp (qseecom)
+ *         resolves to the real [OEM] 49b00000/6MiB region
+ *   FIX-M3 (reverted 2026-11-15) Q6/wlan firmware span reserved no-map;
+ *         back to the [OEM] status=disabled, see reserved-memory below
+ *   FIX-M4 ramoops_ram@bfe00000 carried ([OEM]-active; inert reservation)
+ *   FIX-M5 ess_switch switch_mac_mode 0x0 -> 0x0b ([OEM] rev0 FDT value;
+ *         the board is rtq7300t-rev0, the prior 0x0 was a rev2 carry-over)
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
+
+#include "ipq9574.dtsi"
+
+/ {
+	model = "Askey SBE1V1K (RTQ7300T)";
+	/*
+	 * [OEM] machine chain is
+	 *   "qcom,ipq9574-ap-al02-c4","qcom,ipq9574-al02","qcom,ipq9574",
+	 *   "askey,rtq7300t-rev{0,1,2}";
+	 * "askey,sbe1v1k" is added as the most specific board name (matches [COMM]).
+	 */
+	compatible = "askey,sbe1v1k", "qcom,ipq9574-ap-al02-c4", "qcom,ipq9574";
+
+	/*
+	 * The vendor QCA APPSBL adds these two root properties at boot (fdt
+	 * fixup from SMEM socinfo); our chain hands the kernel this FDT
+	 * unpatched, so they live here. cpr3-util BUG()s without
+	 * soc_version_major (cpr3_determine_part_type, first boot with
+	 * apc_cpr enabled). Silicon on these units: soc0 machine IPQ9570,
+	 * soc_id 513, revision 1.1 -> major 1, which also selects the v1
+	 * qcom,cpr-parts-voltage the dtsi carries.
+	 * socinfo.h reads both with le32_to_cpu() (the APPSBL stores them
+	 * CPU-endian), so they are byte arrays here: a plain <1> reads back
+	 * as 0x01000000 and cpr3 then wants the -v2 parts voltage (rc=-22).
+	 */
+	soc_version_major = [01 00 00 00];	/* little endian, see below */
+	cpu_type = [01 02 00 00];		/* 513, little endian */
+
+	aliases {
+		led-boot = &led_blue;
+		led-failsafe = &led_red;
+		led-running = &led_blue;
+		led-upgrade = &led_blue;
+
+		/* [OEM] aliases verbatim (console + BT/iot uart + third uart) */
+		serial0 = &blsp1_uart2;
+		serial2 = &blsp1_uart3;
+		serial3 = &blsp1_uart1;
+
+		/* [OEM] ethernet aliases: eth0=dp1(10G) eth1=dp2(2.5G) eth2/3=dp3/dp4(1G) */
+		ethernet0 = &dp1;
+		ethernet1 = &dp2;
+		ethernet2 = &dp3;
+		ethernet3 = &dp4;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	/*
+	 * [FIX-M1] Explicit DRAM window.  ipq9574.dtsi ships
+	 * memory@40000000 with reg size 0 ("bootloader fills in the size"),
+	 * which is fine on reference boards but is the one structural delta
+	 * from both FDTs proven to boot on this unit: [OEM] and the 1.x
+	 * running FDT both declare 0x40000000..0x80000000 (1 GiB) verbatim.
+	 * Declaring it here removes the boot path's dependency on the vendor
+	 * APPSBL running its fdt memory fixup; when the fixup does run it
+	 * overwrites reg with the measured size, so this is never wrong.
+	 */
+	memory@40000000 {
+		reg = <0x0 0x40000000 0x0 0x40000000>;
+	};
+
+	/*
+	 * reserved-memory, addresses and sizes [OEM] (A-unit vendor FDT).
+	 * NOTE: the stock QSDK memory include (ipq9574-qcn9224-default-memory.dtsi)
+	 * carries RDP433 addresses (qcn9224_pcie1@50100000 / 52500000 / 54900000)
+	 * and is therefore NOT included here; the SBE1V1K vendor FDT places the
+	 * three QCN9224 host-DDR windows at 0x50f00000 / 0x54100000 / 0x57300000.
+	 * Disabled in [OEM] and omitted: nss@40000000, qcn9224_pcie0@4dd00000
+	 * (pcie0 radio, disabled), qcn9000_pcie0@5c500000 (QCN9000 PCIe window,
+	 * disabled).  ramoops_ram@bfe00000 is now carried (FIX-M4).
+	 * The four label-carrying regions below are kept (disabled) because
+	 * ipq9574.dtsi references them structurally (q6v5_wcss remoteproc needs
+	 * q6_region/m3_dump/q6_caldb_region, tmc_etr needs q6_etr_region); without
+	 * the labels the dtb does not build.
+	 */
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/*
+		 * [FIX-M2] tzapp, [OEM] tzapp@49B00000, 6 MiB, no-map.  Declared
+		 * under the dtsi's node name tzapp@0 on purpose: ipq9574.dtsi's
+		 * qseecom node references &tzapp (the empty tzapp@0 stub), so a
+		 * separate tzapp@49b00000 node reserved the right range but left
+		 * qseecom pointing at a node with no reg.  This block merges into
+		 * tzapp@0 (no-map is inherited from the dtsi stub) and fixes the
+		 * wiring; [OEM] root qseecom points at this exact region.
+		 */
+		tzapp@0 {
+			reg = <0x0 0x49b00000 0x0 0x600000>;
+		};
+
+		uboot@4a100000 {
+			no-map;
+			reg = <0x0 0x4a100000 0x0 0x400000>;
+		};
+
+		sbl@4a500000 {
+			no-map;
+			reg = <0x0 0x4a500000 0x0 0x100000>;
+		};
+
+		tz@4a600000 {
+			no-map;
+			reg = <0x0 0x4a600000 0x0 0x400000>;
+		};
+
+		smem@4aa00000 {
+			no-map;
+			reg = <0x0 0x4aa00000 0x0 0x100000>;
+		};
+
+		/*
+		 * Q6/wlan firmware span, [OEM] addresses verbatim and [OEM] state:
+		 * status = "disabled", so the 50 MiB go back to the allocator.
+		 * Labels are kept (ipq9574.dtsi q6v5_wcss/tmc_etr reference them
+		 * structurally). Nothing uses the span: the wcss remoteproc and the
+		 * AHB wifi@c0000000 stay disabled, ath12k radios use the
+		 * qcn9224_pcieN windows. FIX-M3 had reserved it no-map because the
+		 * 1.x FDT did; the boot failures of that time were the missing CPU
+		 * voltage scaling (see "CPU/NPU voltage scaling" below).
+		 */
+		q6_region: wcnss@4ab00000 {
+			no-map;
+			reg = <0x0 0x4ab00000 0x0 0x2b00000>;
+			status = "disabled";
+		};
+
+		m3_dump: m3_dump@4d600000 {
+			no-map;
+			reg = <0x0 0x4d600000 0x0 0x100000>;
+			status = "disabled";
+		};
+
+		q6_etr_region: q6_etr_dump@1 {
+			no-map;
+			reg = <0x0 0x4d700000 0x0 0x100000>;
+			status = "disabled";
+		};
+
+		q6_caldb_region: q6_caldb_region@4d800000 {
+			no-map;
+			reg = <0x0 0x4d800000 0x0 0x500000>;
+			status = "disabled";
+		};
+
+		/* [OEM] qcn9224 host-ddr windows, one per enabled PCIe radio */
+		qcn9224_pcie1: qcn9224_pcie1@50f00000 {
+			no-map;
+			reg = <0x0 0x50f00000 0x0 0x3200000>;
+		};
+
+		qcn9224_pcie2: qcn9224_pcie2@54100000 {
+			no-map;
+			reg = <0x0 0x54100000 0x0 0x3200000>;
+		};
+
+		qcn9224_pcie3: qcn9224_pcie3@57300000 {
+			no-map;
+			reg = <0x0 0x57300000 0x0 0x3200000>;
+		};
+
+		/* [OEM] MHI regions: dma_pool1/2/3, shared-dma-pool, 0x900000 each */
+		mhi_region1: mhi-region1@0 {
+			compatible = "shared-dma-pool";
+			no-map;
+			size = <0x0 0x900000>;
+			alignment = <0x0 0x100000>;
+		};
+
+		mhi_region2: mhi-region2@0 {
+			compatible = "shared-dma-pool";
+			no-map;
+			size = <0x0 0x900000>;
+			alignment = <0x0 0x100000>;
+		};
+
+		mhi_region3: mhi-region3@0 {
+			compatible = "shared-dma-pool";
+			no-map;
+			size = <0x0 0x900000>;
+			alignment = <0x0 0x100000>;
+		};
+
+		/*
+		 * mlo_global_mem_0, used by all three QCN9224s. The OEM reserved
+		 * 0x1100000 for its WBE.1.1.r7 firmware; WBE.1.4 asks for 18 MiB
+		 * (QMI MLO_GLOBAL_MEM 18874368) and every chip failed with
+		 * "failed to assign qmi target memory: -22". 0x1200000 as in the
+		 * QSDK ipq9574-qcn9224-default-memory.dtsi and the ASUS
+		 * ipq5332-default-memory.dtsi shipped with WBE.1.4.
+		 * The firmware also needs it 1 MiB aligned: placed at
+		 * 0xbd2fa000 every chip asserted right after mission mode.
+		 */
+		mlo_global_mem0: mlo-global-mem@0 {
+			no-map;
+			size = <0x0 0x1200000>;
+			alignment = <0x0 0x100000>;
+		};
+
+		/*
+		 * pstore RAM: a kernel panic/oops survives the warm reset that
+		 * follows it and shows up in /sys/fs/pstore after the reboot
+		 * (four 256 KiB dump records plus a 256 KiB console record).
+		 * Not at the OEM ramoops_ram@bfe00000: U-Boot relocates to the
+		 * top of DRAM and clears its 256 MiB malloc area below it
+		 * (SYS_MALLOC_LEN 0x10000000, SYS_MALLOC_CLEAR_ON_INIT), so
+		 * that region came back empty after a test panic. U-Boot itself
+		 * runs at 0x4a240000 and loads the FIT at 0x60000000; 0x90000000
+		 * is outside both on these 2 GiB units.
+		 */
+		ramoops@90000000 {
+			compatible = "ramoops";
+			reg = <0x0 0x90000000 0x0 0x140000>;
+			no-map;
+			record-size = <0x40000>;
+			console-size = <0x40000>;
+		};
+	};
+};
+
+/*
+ * [OEM] rpm-glink regulators (MP5496). Values verbatim from the vendor FDT
+ * (0x8f6ec=587500, 0x106738=1075000, 0xaae60=700000, 0xf4240=1000000).
+ * s4 (min=1/max=9, driver-internal level units) is the NSS MX rail and is
+ * carried over verbatim as well. The community tree uses
+ * regulator-min-microvolt = <725000> for s1 (SVS comment); both bring the
+ * regulator up before the 800MHz boot clock is changed, keep the OEM values.
+ */
+&rpm_requests {
+	regulators {
+		compatible = "qcom,rpm-mp5496-regulators";
+
+		ipq9574_s1: s1 {
+			regulator-min-microvolt = <587500>;
+			regulator-max-microvolt = <1075000>;
+			regulator-always-on;
+		};
+
+		ipq9574_s2: s2 {
+			regulator-min-microvolt = <700000>;
+			regulator-max-microvolt = <1000000>;
+			regulator-always-on;
+		};
+
+		ipq9574_s4: s4 {
+			regulator-min-microvolt = <1>;
+			regulator-max-microvolt = <9>;
+			regulator-always-on;
+		};
+	};
+};
+
+/*
+ * [OEM] CPU/NPU voltage scaling. The vendor FDT gives every CPU
+ * cpu-supply = apc_corner (CPR4 closed loop on s1, per-part fused corners,
+ * 2208MHz ceiling 1062500uV), enables the APM, feeds npu_cpr from s2 and
+ * gives nss0 npu-supply/mx-supply (same as rdp433). Without these the
+ * kryo cpufreq driver switches up to 2208MHz while s1 stays at the 875mV
+ * boot level: weaker parts take random oopses, corrupted registers, RCU
+ * stalls and hard lockups within seconds of boot.
+ */
+&CPU0 {
+	cpu-supply = <&apc_vreg>;
+	voltage-tolerance = <1>;
+};
+
+&CPU1 {
+	cpu-supply = <&apc_vreg>;
+	voltage-tolerance = <1>;
+};
+
+&CPU2 {
+	cpu-supply = <&apc_vreg>;
+	voltage-tolerance = <1>;
+};
+
+&CPU3 {
+	cpu-supply = <&apc_vreg>;
+	voltage-tolerance = <1>;
+};
+
+&apc_apm {
+	status = "okay";
+};
+
+&apc_cpr {
+	vdd-supply = <&ipq9574_s1>;
+	status = "okay";
+};
+
+&npu_cpr {
+	vdd-supply = <&ipq9574_s2>;
+	status = "okay";
+};
+
+&nss0 {
+	npu-supply = <&npu_vreg>;
+	mx-supply = <&ipq9574_s4>;
+};
+
+/*
+ * [OEM] gpio_keys: single reset button on gpio54, active low, 60ms debounce
+ * (identical in [COMM]).
+ */
+&soc {
+	gpio_keys: gpio-keys {
+		compatible = "gpio-keys";
+		pinctrl-0 = <&gpio_keys_default>;
+		pinctrl-names = "default";
+
+		reset {
+			label = "reset";
+			linux,code = <KEY_RESTART>;
+			gpios = <&tlmm 54 GPIO_ACTIVE_LOW>;
+			linux,input-type = <1>;
+			debounce-interval = <60>;
+		};
+	};
+
+	/*
+	 * Status LED (one RGB package) on the PWM controller, [OEM] wiring from
+	 * the rev0 FDT pwm_pinmux: gpio44 = pwm00 (red, ch0), gpio45 = pwm10
+	 * (green, ch1), gpio56 = pwm24 (blue, ch2); gpio53 = pwm32 is the fan
+	 * (ch3). The OEM drives the same three channels from askey_pwm with a
+	 * 40 us period. Brightness 0..255 maps linearly to the duty cycle, so
+	 * the colours can be mixed and dimmed; node names, labels and the
+	 * led-* aliases are unchanged from the earlier GPIO on/off version.
+	 */
+	leds {
+		compatible = "pwm-leds";
+
+		led_blue: led-blue {
+			color = <LED_COLOR_ID_BLUE>;
+			function = LED_FUNCTION_STATUS;
+			pwms = <&pwm 2 40000>;
+			max-brightness = <255>;
+		};
+
+		led_red: led-red {
+			color = <LED_COLOR_ID_RED>;
+			function = LED_FUNCTION_STATUS;
+			pwms = <&pwm 0 40000>;
+			max-brightness = <255>;
+		};
+
+		led-green {
+			color = <LED_COLOR_ID_GREEN>;
+			function = LED_FUNCTION_STATUS;
+			pwms = <&pwm 1 40000>;
+			max-brightness = <255>;
+		};
+	};
+
+	/*
+	 * Fan. [OEM] has no fan/hwmon node, but enables the PWM controller
+	 * (qti,ipq9574-pwm@1941010, status ok) and muxes gpio53 as pwm32.
+	 * [COMM] measured a pwm-fan on gpio53 - carried over in the QSDK14 6.6
+	 * binding form (&pwm is tcsr pwm@a010 in ipq9574.dtsi, #pwm-cells = <2>,
+	 * so the flags cell of the [COMM] 3-cell form is dropped). PWM channel
+	 * index 3 follows [COMM]; confirm channel-to-gpio mapping of the QSDK
+	 * ipq9574-pwm driver at bring-up.
+	 */
+	fan: pwm-fan {
+		compatible = "pwm-fan";
+		pwms = <&pwm 3 40000>;
+		/* [OEM] tachometer on gpio40 (pwm_pins mux_5, input with
+		 * pull-up), polled by the OEM askey_pwm daemon. Here the
+		 * pwm-fan driver counts falling edges and reports fan1_input.
+		 * OEM rpm_list: 100 % duty = 4700 rpm. */
+		interrupts-extended = <&tlmm 40 IRQ_TYPE_EDGE_FALLING>;
+		pulses-per-revolution = <2>;
+		#cooling-cells = <2>;
+		cooling-levels = <36 72 128 255>;
+	};
+
+	/*
+	 * [COMM] thermal/cooling shape, bound to the ipq9574.dtsi tsens. Sensor
+	 * id 15 (top-glue) per [COMM] bring-up; trips drive the fan above.
+	 *
+	 * The zone must poll. The dtsi/[OEM] zones all use polling-delay 0
+	 * (interrupt only), but they bind no cooling device - they only reboot
+	 * on a critical trip. This zone drives the fan through four active
+	 * trips with the step_wise governor, and without a poll interval the
+	 * governor only runs when a tsens threshold interrupt arrives: measured
+	 * 2026-11-16 the main unit sat at 83.8 C with the fan still on level 0
+	 * (951 rpm) while the cooler node was stuck one level higher, each
+	 * holding whatever level its last interrupt produced. Forcing level 3
+	 * by hand took it from 83.8 C to 66.3 C in two minutes, so the fan and
+	 * the cooling-levels are fine - only the re-evaluation was missing.
+	 *
+	 * Active trips use 3 C hysteresis: with 1 C and polling, a load that
+	 * parks the sensor on a trip (49.7-50.3 C under full load on the
+	 * third unit) toggled the fan between two levels every 10-30 s.
+	 */
+	thermal-zones {
+		top-glue-thermal {
+			polling-delay-passive = <2000>;
+			polling-delay = <5000>;
+			thermal-sensors = <&tsens 15>;
+
+			trips {
+				trip_crit: crit {
+					temperature = <110000>;
+					hysteresis = <1000>;
+					type = "critical";
+				};
+
+				trip_hot: hot {
+					temperature = <100000>;
+					hysteresis = <1000>;
+					type = "hot";
+				};
+
+				trip_active_high: active-high {
+					temperature = <80000>;
+					hysteresis = <3000>;
+					type = "active";
+				};
+
+				trip_active_med: active-med {
+					temperature = <65000>;
+					hysteresis = <3000>;
+					type = "active";
+				};
+
+				trip_active_low: active-low {
+					temperature = <50000>;
+					hysteresis = <3000>;
+					type = "active";
+				};
+
+				trip_active_silent: active-silent {
+					temperature = <40000>;
+					hysteresis = <3000>;
+					type = "active";
+				};
+			};
+
+			cooling-maps {
+				map-active-high {
+					cooling-device = <&fan 3 3>;
+					trip = <&trip_active_high>;
+				};
+
+				map-active-med {
+					cooling-device = <&fan 2 2>;
+					trip = <&trip_active_med>;
+				};
+
+				map-active-low {
+					cooling-device = <&fan 1 1>;
+					trip = <&trip_active_low>;
+				};
+
+				map-active-silent {
+					cooling-device = <&fan 0 0>;
+					trip = <&trip_active_silent>;
+				};
+			};
+		};
+	};
+
+};
+
+&pwm {
+	pinctrl-0 = <&pwm_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+/* console, ttyMSM0 [OEM] pins gpio34/35 */
+&blsp1_uart2 {
+	pinctrl-0 = <&blsp1_uart2_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+/* BT/iot uart, ttyMSM2 [OEM] (R2: EFR32MG21), 4-wire + bt_reset gpio42 */
+&blsp1_uart3 {
+	pinctrl-0 = <&iot_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+/*
+ * eMMC (sdhc_1 = mmc@7804000). [OEM] controller properties: sdhci-msm-v5,
+ * HS400/HS400-ES/HS200/DDR, max-frequency 384MHz, bus-width 8, non-removable.
+ *
+ * eMMC GPT partition map [BKUP] (43 partitions; GPT names from the A-unit
+ * backup tar member naming, cross-checked against the vendor FDT-driven
+ * partition consumers; p17 name "0:APPSBLENV" inferred from member naming,
+ * to confirm on device with lsblk -o NAME,PARTLABEL):
+ *   p01 0:SBL1        p02 0:SBL1_1      p03 0:BOOTCONFIG  p04 0:BOOTCONFIG1
+ *   p05 0:QSEE        p06 0:QSEE_1      p07 0:DEVCFG      p08 0:DEVCFG_1
+ *   p09 0:APDP        p10 0:APDP_1      p11 0:TME         p12 0:TME_1
+ *   p13 0:RPM         p14 0:RPM_1       p15 0:CDT         p16 0:CDT_1
+ *   p17 0:APPSBLENV   p18 0:APPSBL      p19 0:APPSBL_1    p20 0:ART
+ *   p21 0:ETHPHYFW    p22 0:LICENSE     p23 0:WIFIFW      p24 0:WIFIFW_1
+ *   p25 0:HLOS        p26 0:HLOS_1      p27 rootfs        p28 rootfs_1
+ *   p29 rootfs_data   p30 rootfs_data_1 p31 econfig       p32 edata
+ *   p33 log           p34 persist       p35 usr_app       p36 tls
+ *   p37 backup_tls    p38 bypass_cert   p39 rsvd_1        p40 rsvd_2
+ *   p41 rsvd_3        p42 user_data     p43 ASKEYMFC
+ *
+ * The two partitions consumed by the OS as raw nvmem are 0:ART (p20) and
+ * 0:APPSBLENV (p17, CRC'd u-boot env, header CRC32 0xf51cb3e0 verified against
+ * the factory image). The mmc-card/block-device/block-partition binding used
+ * below is the mainline (>=v6.9) / OpenWrt-patched form: on an unpatched
+ * QSDK14 6.6 kernel the GPT is parsed by the block layer and the nvmem cells
+ * below will not materialize - in that case derive MACs from the u-boot env
+ * or add the block-partition patches to the QSDK14 kernel package.
+ */
+&sdhc_1 {
+	bus-width = <8>;
+	max-frequency = <384000000>;
+	mmc-ddr-1_8v;
+	mmc-hs200-1_8v;
+	mmc-hs400-1_8v;
+	mmc-hs400-enhanced-strobe;
+	pinctrl-0 = <&sdc_default_state>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	card@0 {
+		compatible = "mmc-card";
+		reg = <0>;
+
+		block {
+			compatible = "block-device";
+
+			partitions {
+				block-partition-art {
+					partname = "0:ART";
+
+					nvmem-layout {
+						compatible = "fixed-layout";
+						#address-cells = <1>;
+						#size-cells = <1>;
+
+						/*
+						 * [ART] offset 0x0 = WAN MAC 90:d3:cf:xx:xx:91.
+						 * Derived users: +0 WAN, +1 LAN (u-boot env
+						 * eth1-4addr), -3/-1/-2 = the three radio MACs
+						 * (== MACs stored inside the ART radio blocks).
+						 */
+						ethaddr: ethaddr@0 {
+							compatible = "mac-base";
+							reg = <0x0 0x6>;
+							#nvmem-cell-cells = <1>;
+						};
+					};
+				};
+
+				block-partition-appsblenv {
+					partname = "0:APPSBLENV";
+
+					nvmem-layout {
+						compatible = "u-boot,env-layout";
+					};
+				};
+			};
+		};
+	};
+};
+
+/*
+ * MDIO / PHYs. [OEM] mdio@90000 (qca-mdio) enumerates MDIO addresses
+ * 16,17 (QCA8075 package), 18,19 (QCA8075 ports), 28 (QCA8081) and a
+ * clause-45 PHY at address 0 (RTL8261N 10G). Package reset gpio60,
+ * QCA8081 reset gpio52 appear in the [OEM] mdio phy-reset-gpio list; the
+ * RTL8261N reset gpio41 appears in the rev0 [OEM] list and in [COMM]
+ * (reset-gpios on the PHY node - the correct mainline form, kept here).
+ * gpio60 is a shared package reset held at board level: [COMM] drives it
+ * from a gpio-hog because reset-gpios is not honored on package nodes.
+ */
+&mdio {
+	status = "okay";
+
+	rtl8261n_0: ethernet-phy@0 {
+		compatible = "ethernet-phy-ieee802.3-c45";
+		reg = <0>;
+		/*
+		 * No reset-gpios on purpose ([OEM] wiring, wire-audit 20261109):
+		 * U-Boot (APPSBL) programs the RTL8261N from the 0:ETHPHYFW
+		 * partition (p21) over MDIO at every power-up ("ETHPHYFW Loading
+		 * failed"/"bad magic on ETHPHYFW partition" strings). This PHY
+		 * keeps its firmware in RAM, so a kernel-side reset wipes it -
+		 * phy_id then reads 0x0 and the port never gets a carrier
+		 * (pre21 a10 finding). The OEM stack never resets it; neither
+		 * do we. If firmware reload is ever needed in-kernel, pair a
+		 * reset with a real fw loader (PR #22811 style) instead.
+		 */
+	};
+
+	ethernet-phy-package@16 {
+		compatible = "qcom,qca8075-package";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <16>;
+
+		qcom,package-mode = "qsgmii";
+
+		/* phy@18: dp3's RJ45 jack is wired to package member mdio 0x12 (=18).
+		 * 2026-11-10 live evidence: AN link-partner codeword (reg5=0xdde1) lands
+		 * on member 0x12 with the cable plugged, member 0x11 sees none; OEM rev0
+		 * FDT also binds port3 -> 0x12. The 2026-11-09 "0x11" jack-swap reading
+		 * was wrong (ssk bypass reads on package members are unreliable). Member
+		 * 0x11 is declared-but-unwired. */
+		qca8075_17: ethernet-phy@17 {
+			compatible = "ethernet-phy-ieee802.3-c22";
+			reg = <17>;
+		};
+
+		qca8075_18: ethernet-phy@18 {
+			compatible = "ethernet-phy-ieee802.3-c22";
+			reg = <18>;
+		};
+
+		qca8075_19: ethernet-phy@19 {
+			compatible = "ethernet-phy-ieee802.3-c22";
+			reg = <19>;
+		};
+	};
+
+	qca8081_28: ethernet-phy@28 {
+		compatible = "ethernet-phy-id004d.d101";
+		reg = <28>;
+		reset-gpios = <&tlmm 52 GPIO_ACTIVE_LOW>;
+		reset-deassert-us = <10000>;
+
+		/* Polarity: active-low. The OEM led_source "active = high" nodes
+		 * describe the PPE switch LED sources, not these PHY LEDs; OEM
+		 * ETH_led_control.sh writes MMD7.0x901a = 0x6 (bit6 clear) for
+		 * this PHY. Checked on the unit 2026-11-12: with active-high both
+		 * LEDs were lit with no cable; with active-low they are off.
+		 * Pattern words come from /etc/init.d/sbe-port-leds. */
+		leds {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			led@0 {
+				reg = <0>;
+				color = <LED_COLOR_ID_YELLOW>;
+				default-state = "keep";
+				function = LED_FUNCTION_LAN;
+				active-low;
+			};
+
+			led@2 {
+				reg = <2>;
+				color = <LED_COLOR_ID_GREEN>;
+				default-state = "keep";
+				function = LED_FUNCTION_LAN;
+				active-low;
+			};
+		};
+	};
+};
+
+&tlmm {
+	/*
+	 * Pinmux state nodes MUST be children of the TLMM node: the pinctrl core
+	 * resolves a pinctrl-0 phandle by walking UP from the state node until it
+	 * finds the registered pin controller (drivers/pinctrl/devicetree.c
+	 * dt_to_map_one_config()). A state outside &tlmm walks to the root, gets
+	 * -ENODEV, and with CONFIG_MODULES=y that becomes -EPROBE_DEFER forever
+	 * (pci x3 / serial x2 / pwm / mmc permanent -517, o2-b2 root cause).
+	 */
+	/*
+	 * UART map (all six BLSP uarts exist in ipq9574.dtsi as blsp1_uart0..5;
+	 * [OEM] status: 78af000=blsp1_uart0 disabled, 78b0000=blsp1_uart1
+	 * disabled (alias serial3), 78b1000=blsp1_uart2 ENABLED (console,
+	 * ttyMSM0, pins gpio34/35 blsp2_uart), 78b2000=blsp1_uart3 ENABLED
+	 * (BT/iot, ttyMSM2 - R2 finding: Silicon Labs EFR32MG21 on ttyMSM2,
+	 * 4-wire pins gpio15-18 + bt_reset gpio42 + iot_recovery gpio64),
+	 * 78b3000=blsp1_uart4 disabled (DMA-capable), 78b4000=blsp1_uart5
+	 * disabled. Only the two enabled uarts are touched here; the rest keep
+	 * the dtsi "disabled" default.
+	 */
+	blsp1_uart2_pins: blsp1-uart2-state {
+		blsp1_uart2_pinmux {
+			pins = "gpio34", "gpio35";
+			function = "blsp2_uart";
+			drive-strength = <8>;
+			bias-disable;
+		};
+	};
+
+	/*
+	 * [OEM] iot_pins group, verbatim: 4-wire uart for the BT module plus its
+	 * reset line and the iot recovery input. Referenced by blsp1_uart3 below
+	 * exactly as the vendor FDT does (pinctrl of serial@78b2000).
+	 */
+	iot_pins: iot-pins-state {
+		blsp1_uart3_pinmux {
+			pins = "gpio15", "gpio16", "gpio17", "gpio18";
+			function = "blsp3_uart";
+			drive-strength = <8>;
+			bias-disable;
+		};
+
+		bt_reset {
+			pins = "gpio42";
+			function = "gpio";
+			drive-strength = <8>;
+			output-high;
+			bias-pull-up;
+		};
+
+		iot_recovery {
+			pins = "gpio64";
+			function = "gpio";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+	};
+
+	gpio_keys_default: gpio-keys-default-state {
+		pins = "gpio54";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+
+	/*
+	 * [COMM] eMMC pins, measured working (gpio0-9 + rclk gpio10). The vendor
+	 * FDT rev2 carries no emmc pinctrl at all (rev0/rev1 had an emmc_pins
+	 * block with differing drive strengths); the dtsi default state plus this
+	 * board state is the safe superset.
+	 */
+	sdc_default_state: sdc-default-state {
+		clk-pins {
+			pins = "gpio5";
+			function = "sdc_clk";
+			drive-strength = <8>;
+			bias-disable;
+		};
+
+		cmd-pins {
+			pins = "gpio4";
+			function = "sdc_cmd";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+
+		data-pins {
+			pins = "gpio0", "gpio1", "gpio2",
+			       "gpio3", "gpio6", "gpio7",
+			       "gpio8", "gpio9";
+			function = "sdc_data";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+
+		rclk-pins {
+			pins = "gpio10";
+			function = "sdc_rclk";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+	};
+
+	/* PCIe 1/2/3 pin control - [COMM] form, perst gpios 26/29/32 match [OEM]
+	 * perst-gpio properties (0x13 0x1a / 0x1d / 0x20 = gpio26/29/32). */
+	pcie1_default: pcie1-default-state {
+		clkreq-n-pins {
+			pins = "gpio25";
+			function = "pcie1_clk";
+			drive-strength = <6>;
+			bias-pull-up;
+		};
+
+		perst-n-pins {
+			pins = "gpio26";
+			function = "gpio";
+			drive-strength = <8>;
+			bias-pull-down;
+			output-low;
+		};
+
+		wake-n-pins {
+			pins = "gpio27";
+			function = "pcie1_wake";
+			drive-strength = <6>;
+			bias-pull-up;
+		};
+	};
+
+	pcie2_default: pcie2-default-state {
+		clkreq-n-pins {
+			pins = "gpio28";
+			function = "pcie2_clk";
+			drive-strength = <6>;
+			bias-pull-up;
+		};
+
+		perst-n-pins {
+			pins = "gpio29";
+			function = "gpio";
+			drive-strength = <8>;
+			bias-pull-down;
+			output-low;
+		};
+
+		wake-n-pins {
+			pins = "gpio30";
+			function = "pcie2_wake";
+			drive-strength = <6>;
+			bias-pull-up;
+		};
+	};
+
+	pcie3_default: pcie3-default-state {
+		clkreq-n-pins {
+			pins = "gpio31";
+			function = "pcie3_clk";
+			drive-strength = <6>;
+			bias-pull-up;
+		};
+
+		perst-n-pins {
+			pins = "gpio32";
+			function = "gpio";
+			drive-strength = <8>;
+			bias-pull-down;
+			output-low;
+		};
+
+		wake-n-pins {
+			pins = "gpio33";
+			function = "pcie3_wake";
+			drive-strength = <6>;
+			bias-pull-up;
+		};
+	};
+
+	/* [OEM] pwm_pinmux: status LED red/green/blue + fan, all on the PWM block */
+	pwm_pins: pwm-pins {
+		pwm {
+			pins = "gpio44", "gpio45", "gpio56", "gpio53";
+			function = "pwm";
+			drive-strength = <8>;
+		};
+
+		fan-tach {
+			pins = "gpio40";
+			function = "gpio";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+	};
+	/*
+	 * [COMM] QCA8075 package reset (gpio60) held deasserted from gpiochip
+	 * registration; see the mdio block comment. Without this the 1G PHYs
+	 * 18/19 probe as missing and PPE port 3 fails (-ENODEV).
+	 */
+	qca8075_reset_hog {
+		gpio-hog;
+		gpios = <60 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "qca8075-reset-n";
+	};
+};
+
+/*
+ * PPE / switch ([OEM] ess-switch@3a000000, ess driver form of the QSDK14 6.6
+ * tree). switch_mac_mode = 0x0b = the [OEM] rev0 value (oem-fdt-3560132.dtb,
+ * compatible askey,rtq7300t-rev0, ess-switch@3a000000: switch_mac_mode
+ * <0x0b>; rev1 FDT identical, only rev2 = 0x00).  This unit is rev0, so the
+ * earlier rev2 carry-over is corrected here (a10 audit, FIX-M5).
+ * mac_mode1 0x0f / mac_mode2 0x0d cover uniphy1 (2.5G) and uniphy2 (10G).
+ * LAN bitmap 0x3e (bits 1..5, PPE
+ * ports 2-6) and WAN bitmap 0x40 (bit 6) are verbatim [OEM] and identical in
+ * [REF]; the per-port role truth is carried by the dp nodes and port_phyinfo
+ * below.
+ */
+&ess_switch {
+	switch_cpu_bmp = <0x1>;
+	switch_lan_bmp = <0x3e>;
+	switch_wan_bmp = <0x40>;
+	switch_mac_mode = <0x0b>;
+	switch_mac_mode1 = <0xf>;
+	switch_mac_mode2 = <0xd>;
+	bm_tick_mode = <0>;
+	tm_tick_mode = <0>;
+
+	qcom,port_phyinfo {
+		/* PPE ports 1/2 (uniphy0 pair - no jack on this board). The vendor
+		 * rev0 FDT DOES declare them ([OEM] port@0 port_id=1 phy 0x10,
+		 * port@1 port_id=2 phy 0x11) and the 6.6 ssk REQUIRES their slots to
+		 * be non-zero: qca_ssdk_phy_addr_to_port() resolves an incoming phy
+		 * address by scanning phy_address[] over the port bitmap, and with
+		 * ports 1/2 unparsed their zero-initialised slots swallow the lookup
+		 * for port 6 (phy@0), so hsl_phy_phydev_get() checks PHY_F_INIT on
+		 * port 1, returns SW_NOT_INITIALIZED (-21) and the link poll skips
+		 * port 6 on every cycle. Result (live, pre26): the port6 XGMAC
+		 * txmac/rxmac never get enabled - TX_CFG 0x80010000 / RX_CFG
+		 * 0x30000046 (TE/RE=0) while the working port5 GMAC enable bit=1 -
+		 * and the 10G port stays dead at the MAC gate despite L1 up.
+		 * [OEM] 0x11 (17) collides with our dp3 wiring (mdio 17), so ports
+		 * 1/2 take the unused mdio addresses 20/21 instead. */
+		port@0 {
+			port_id = <1>;
+			phy_address = <20>;
+		};
+
+		port@1 {
+			port_id = <2>;
+			phy_address = <21>;
+		};
+
+		/* dp3 - 1G QCA8075 port (mdio 0x12 = 18). [OEM] dp3 phy-mode
+		/* dp3 - 1G QCA8075 port (mdio 0x12 = 18). [OEM] dp3 phy-mode
+		 * "sgmii"; [COMM] uses "qsgmii" for this package - revisit at
+		 * link bring-up. */
+		port@2 {
+			port_id = <3>;
+			phy_address = <18>; /* jack wiring: package port 2 = 0x12; live-AN partner-codeword + OEM FDT port3=0x12 confirmed 2026-11-10 */
+			phy-handle = <&qca8075_18>;
+			/* qsgmii: must match qcom,package-mode; the first attached package
+			 * member (dp3) enforces qca807x_phy_package_config_init_once and
+			 * returned -EINVAL on the sgmii/qsgmii mismatch (pre23 finding, and
+			 * the hidden dp3 probe root cause; [COMM] uses qsgmii here). */
+			phy-mode = "qsgmii";
+		};
+
+		/* dp4 - 1G QCA8075 port (mdio 0x13 = 19). Same qsgmii caveat. */
+		port@3 {
+			port_id = <4>;
+			phy_address = <19>;
+			phy-handle = <&qca8075_19>;
+			phy-mode = "qsgmii"; /* package-mode parity, see port@2 above */
+		};
+
+		/* dp2 - 2.5G QCA8081 (mdio 0x1c = 28). [OEM] phy-mode "sgmii";
+		 * [COMM] declares "usxgmii" for the same PHY - OPEN QUESTION,
+		 * factory evidence says sgmii. */
+		port@4 {
+			port_id = <5>;
+			phy_address = <28>;
+			/* [OEM] rev0 FDT + QSDK db-al02-c1/db-al01-c2 (same QCA8081):
+			 * run the 2.5G SGMII+ link on the port GMAC. Without this the
+			 * 6.6 ssdk picks the 10G XGMAC for SGMII+ (PORT_MUX_CTRL
+			 * port5 mac_sel=1 read back on 1.0-rc2), and board->host TCP
+			 * over WAN topped out at 1.2-2.0 Gbit/s with heavy retransmits. */
+			port_mac_sel = "QGMAC_PORT";
+			phy-handle = <&qca8081_28>;
+			phy-mode = "sgmii";
+		};
+
+		/* dp1 - 10G RTL8261N (clause-45 addr 0). [OEM]/[COMM] agree:
+		 * usxgmii. */
+		port@5 {
+			port_id = <6>;
+			phy_address = <0>;
+			ethernet-phy-ieee802.3-c45;
+			phy-handle = <&rtl8261n_0>;
+			phy-mode = "usxgmii";
+		};
+	};
+};
+
+
+
+&xo {
+	clock-frequency = <24000000>;
+};
+
+&sleep_clk {
+	clock-frequency = <32000>;
+};
+
+
+/*
+ * EDMA board data for edma@3ab00000 - QSDK 6.6 layout, identical to the
+ * ipq9574-rdp433 reference node except for its loopback-ring test block.
+ *
+ * PPE-DS (Wi-Fi direct switch): 3 nodes with the OEM ring/queue map
+ * <rxfill txcmpl rx tx queue-base queue-count>. The 6.6 driver reads the
+ * interrupts by position (edma_v2/edma.c edma_irq_init): 28 txcmpl,
+ * 4 rxdesc, 1 misc, 4 rxfill, then per PPE-DS node txcmpl/rxdesc/rxfill.
+ * The OEM 5.4 table had no rxfill entries, which is why pasting it gave
+ * "IRQ index 42 not found"; the nine PPE-DS interrupt numbers themselves
+ * are the OEM ones. With NSS_DP_POINT_OFFLOAD the driver keeps 2 nodes.
+ */
+&soc {
+
+	edma@3ab00000 {
+qcom,txdesc-ring-start = <4>;		/* Tx desc ring start ID */
+			qcom,txdesc-rings = <28>;		/* Total number of Tx desc rings to be provisioned */
+			qcom,txcmpl-ring-start = <4>;		/* Tx complete ring start ID */
+			qcom,txcmpl-rings = <28>;		/* Total number of Tx complete rings to be provisioned */
+			qcom,rxfill-ring-start = <4>;		/* Rx fill ring start ID */
+			qcom,rxfill-rings = <4>;		/* Total number of Rx fill rings to be provisioned */
+			qcom,rxdesc-ring-start = <20>;		/* Rx desc ring start ID */
+			qcom,rxdesc-rings = <4>;		/* Total number of Rx desc rings to be provisioned */
+			qcom,rx-page-mode = <0>;		/* Rx fill ring page mode */
+			qcom,tx-map-priority-level = <1>;	/* Tx priority level per port */
+			qcom,rx-map-priority-level = <1>;	/* Rx priority level per core */
+			qcom,ppeds-num = <3>;			/* Number of PPEDS nodes */
+			/* PPE-DS node format: <Rx-fill Tx-cmpl Rx Tx Queue-base Queue-count> */
+			qcom,ppeds-map = <1 1 1 1 32 8>,	/* PPEDS Node#0 ring and queue map */
+					<2 2 2 2 40 8>,		/* PPEDS Node#1 ring and queue map */
+					<3 3 3 3 48 8>;		/* PPEDS Node#2 ring and queue map */
+			qcom,txdesc-map = <8 9 10 11>,		/* Port0 per-core Tx ring map */
+					<12 13 14 15>,		/* Port1 per-core Tx ring map */
+					<16 17 18 19>,		/* Port2 per-core Tx ring map */
+					<20 21 22 23>,		/* Port3 per-core Tx ring map */
+					<24 25 26 27>,		/* Port4 per-core Tx ring map */
+					<28 29 30 31>,		/* Port5 per-core Tx ring map */
+					<4 5 6 7>;		/* Used only for packets from VP */
+			qcom,txdesc-fc-grp-map = <1 2 3 4 5 6>;	/* Per GMAC flow control group map */
+			qcom,rxfill-map = <4 5 6 7>;		/* Per-core Rx fill ring map */
+			qcom,rxdesc-map = <20 21 22 23>;	/* Per-core Rx desc ring map */
+			qcom,rx-queue-start = <0>;		/* Rx queue start */
+			qcom,rx-ring-queue-map = <0 8 16 24>,	/* Priority 0 queues per-core Rx ring map */
+					<1 9 17 25>,		/* Priority 1 queues per-core Rx ring map */
+					<2 10 18 26>,		/* Priority 2 queues per-core Rx ring map */
+					<3 11 19 27>,		/* Priority 3 queues per-core Rx ring map */
+					<4 12 20 28>,		/* Priority 4 queues per-core Rx ring map */
+					<5 13 21 29>,		/* Priority 5 queues per-core Rx ring map */
+					<6 14 22 30>,		/* Priority 6 queues per-core Rx ring map */
+					<7 15 23 31>;		/* Priority 7 queues per-core Rx ring map */
+			qcom,vp-id = <8>;			/* Virtual port dummy MAC Id */
+			qcom,txdesc_point_offload_ring = <0>;		/* Txdesc point offlaod ring */
+			qcom,txcmpl_point_offload_ring = <0>;		/* Txcmpl point offlaod ring */
+			qcom,rxfill_point_offload_ring = <0>;		/* Rxfill point offlaod ring */
+			qcom,rxdesc_point_offload_ring = <0>;		/* Rxdesc point offlaod ring */
+			interrupts = <0 367 4>,			/* Tx complete ring id #4 IRQ info */
+				   <0 368 4>,			/* Tx complete ring id #5 IRQ info */
+				   <0 369 4>,			/* Tx complete ring id #6 IRQ info */
+				   <0 370 4>,			/* Tx complete ring id #7 IRQ info */
+				   <0 371 4>,			/* Tx complete ring id #8 IRQ info */
+				   <0 372 4>,			/* Tx complete ring id #9 IRQ info */
+				   <0 373 4>,			/* Tx complete ring id #10 IRQ info */
+				   <0 374 4>,			/* Tx complete ring id #11 IRQ info */
+				   <0 375 4>,			/* Tx complete ring id #12 IRQ info */
+				   <0 376 4>,			/* Tx complete ring id #13 IRQ info */
+				   <0 377 4>,			/* Tx complete ring id #14 IRQ info */
+				   <0 378 4>,			/* Tx complete ring id #15 IRQ info */
+				   <0 379 4>,			/* Tx complete ring id #16 IRQ info */
+				   <0 380 4>,			/* Tx complete ring id #17 IRQ info */
+				   <0 381 4>,			/* Tx complete ring id #18 IRQ info */
+				   <0 382 4>,			/* Tx complete ring id #19 IRQ info */
+				   <0 383 4>,			/* Tx complete ring id #20 IRQ info */
+				   <0 384 4>,			/* Tx complete ring id #21 IRQ info */
+				   <0 509 4>,			/* Tx complete ring id #22 IRQ info */
+				   <0 508 4>,			/* Tx complete ring id #23 IRQ info */
+				   <0 507 4>,			/* Tx complete ring id #24 IRQ info */
+				   <0 506 4>,			/* Tx complete ring id #25 IRQ info */
+				   <0 505 4>,			/* Tx complete ring id #26 IRQ info */
+				   <0 504 4>,			/* Tx complete ring id #27 IRQ info */
+				   <0 503 4>,			/* Tx complete ring id #28 IRQ info */
+				   <0 502 4>,			/* Tx complete ring id #29 IRQ info */
+				   <0 501 4>,			/* Tx complete ring id #30 IRQ info */
+				   <0 500 4>,			/* Tx complete ring id #31 IRQ info */
+				   <0 351 4>,			/* Rx desc ring id #20 IRQ info */
+				   <0 352 4>,			/* Rx desc ring id #21 IRQ info */
+				   <0 353 4>,			/* Rx desc ring id #22 IRQ info */
+				   <0 354 4>,			/* Rx desc ring id #23 IRQ info */
+				   <0 499 4>,			/* Misc error IRQ info */
+				   <0 359 4>,			/* RxFill ring id #4 IRQ info */
+				   <0 360 4>,			/* RxFill ring id #5 IRQ info */
+				   <0 361 4>,			/* RxFill ring id #6 IRQ info */
+				   <0 362 4>,			/* RxFill ring id #7 IRQ info */
+				   <0 364 4>,			/* PPEDS Node #1(TxComp ring id #1) TxComplete IRQ info */
+				   <0 332 4>,			/* PPEDS Node #1(Rx Desc ring id #1) Rx Desc IRQ info */
+				   <0 356 4>,			/* PPEDS Node #1(RxFill Desc ring id #1) Rx Fill IRQ info */
+				   <0 365 4>,			/* PPEDS Node #2(TxComp ring id #2) TxComplete IRQ info */
+				   <0 333 4>,			/* PPEDS Node #2(Rx Desc ring id #2) Rx Desc IRQ info */
+				   <0 357 4>,			/* PPEDS Node #2(RxFill Desc ring id #2) Rx Fill IRQ info */
+				   <0 366 4>,			/* PPEDS Node #3(TxComp ring id #3) TxComplete IRQ info */
+				   <0 334 4>,			/* PPEDS Node #3(Rx Desc ring id #3) Rx Desc IRQ info */
+				   <0 358 4>;			/* PPEDS Node #3(RxFill Desc ring id #3) Rx Fill IRQ info */
+	};
+};
+
+/*
+ * Data-path dp nodes, [OEM] verbatim (regs/modes/mactype/phy addrs), in the
+ * QSDK14 "qcom,nss-dp" form. PPE ports 1/2 (uniphy0 pair) have no jack on
+ * this board but MUST stay declared in qcom,port_phyinfo below (vendor FDT
+ * declares them; dropping them breaks the ssk phy-address lookup for port
+ * 6 - see the port_phyinfo comment). MAC binding via the
+ * 0:ART mac-base cell (role-corrected, Orangeyoo 0001 patch semantics:
+ * 10G = LAN, 2.5G = WAN):
+ *   dp1 -> PPE port 6, 10G RTL8261N, usxgmii, LAN   (factory alias eth0)
+ *   dp2 -> PPE port 5, 2.5G QCA8081, sgmii, WAN     (factory alias eth1)
+ *   dp3 -> PPE port 3, 1G QCA8075@18, LAN           (factory alias eth2)
+ *   dp4 -> PPE port 4, 1G QCA8075@19, LAN           (factory alias eth3)
+ * The QSDK nss-dp driver may ignore the nvmem mac-address cell (the vendor
+ * FDT leaves local-mac-address zeroed and sets MACs from userspace); the
+ * cells are the OpenWrt-oriented intent and are harmless otherwise.
+ */
+&soc {
+	dp1: dp1 {
+		device_type = "network";
+		compatible = "qcom,nss-dp";
+		qcom,id = <6>;
+		reg = <0x3a514000 0x40>; /* [OEM] rev0 FDT dp1 window 0x40 (delivered fdt@1 6d31c5cf) */
+		qcom,mactype = <1>;
+		qcom,link-poll = <1>;
+		local-mac-address = [00 00 00 00 00 00];
+
+		nvmem-cells = <&ethaddr 1>;
+		nvmem-cell-names = "mac-address";
+	};
+
+	dp2: dp2 {
+		device_type = "network";
+		compatible = "qcom,nss-dp";
+		qcom,id = <5>;
+		reg = <0x3a001800 0x200>;
+		qcom,mactype = <0>;
+		qcom,link-poll = <1>;
+		local-mac-address = [00 00 00 00 00 00];
+
+		nvmem-cells = <&ethaddr 0>;
+		nvmem-cell-names = "mac-address";
+	};
+
+	dp3: dp3 {
+		device_type = "network";
+		compatible = "qcom,nss-dp";
+		qcom,id = <3>;
+		reg = <0x3a001400 0x200>;
+		qcom,mactype = <0>;
+		qcom,link-poll = <1>;
+		local-mac-address = [00 00 00 00 00 00];
+
+		nvmem-cells = <&ethaddr 1>;
+		nvmem-cell-names = "mac-address";
+	};
+
+	dp4: dp4 {
+		device_type = "network";
+		compatible = "qcom,nss-dp";
+		qcom,id = <4>;
+		reg = <0x3a001600 0x200>;
+		qcom,mactype = <0>;
+		qcom,link-poll = <1>;
+		local-mac-address = [00 00 00 00 00 00];
+
+		nvmem-cells = <&ethaddr 1>;
+		nvmem-cell-names = "mac-address";
+	};
+};
+
+/* [OEM] usb3@8a00000 enabled, host mode (dwc3, qusb2 + qmp usb3 phys). */
+&usb3 {
+	status = "okay";
+};
+
+/*
+ * [OEM] The dwc3@8a00000 node consumes phys = <&qusb_phy_0>, <&ssphy_0> and the
+ * vendor FDT has both providers enabled (qusb@7b000 ok, ssphy@7d000 ok with its
+ * lane@7d200). The 6.6 dtsi ships both providers disabled, so no phy provider
+ * was ever registered and dwc3 sat in -EPROBE_DEFER on usb2-phy (and usb3-phy)
+ * permanently. Enable both. The vendor FDT describes no regulator supplies for
+ * either phy, so none are added (regulator core dummies; in-tree ipq9574 refs
+ * only attach their own board rails).
+ */
+&qusb_phy_0 {
+	status = "okay";
+};
+
+&ssphy_0 {
+	status = "okay";
+};
+
+/*
+ * =====================================================================
+ * WiFi: 3x QCN9274-family (QCN9224-class) PCIe radios + WSI ring
+ * =====================================================================
+ *
+ * R4 matrix from the [OEM] vendor FDT (identical in rev0/rev1/rev2):
+ *
+ *   node            compatible           bus        status   qrtr   notes
+ *   --------------- -------------------- ---------- -------- ------ -----
+ *   wifi@c0000000   qcom,cnss-qca9574    AHB/SOC    disabled  -     internal-radio family (coex + led-gpio64 config attached)
+ *   wifi1@f00000    qcom,cnss-qcn9000    PCIe slot  disabled  0x20  QCN9000 slot 1
+ *   wifi2@f00000    qcom,cnss-qcn9000    PCIe slot  disabled  0x21  QCN9000 slot 2
+ *   wifi3@f00000    qcom,cnss-qcn9000    PCIe slot  disabled  0x22  QCN9000 slot 3
+ *   wifi4@f00000    qcom,cnss-qcn9224    pcie0      disabled  0x30  base-addr 0x4dd00000, window disabled
+ *   wifi5@f00000    qcom,cnss-qcn9224    pcie1      ok        0x31  base 0x50f00000, board_id 1
+ *   wifi6@f00000    qcom,cnss-qcn9224    pcie2      ok        0x32  base 0x54100000, board_id 4
+ *   wifi7@f00000    qcom,cnss-qcn9224    pcie3      ok        0x33  base 0x57300000, board_id 2
+ *
+ * PCIe controllers [OEM] (qti,pcie-ipq9574):
+ *   0x28000000 pcie0 (x1, gpio23 perst) DISABLED - no radio
+ *   0x10000000 pcie1 (x1, gpio26)  OK - radio, [REF]/dtsi PCI domain 1 -> 0001:01:00.0
+ *   0x20000000 pcie2 (x2, gpio29)  OK - radio, PCI domain 2 -> 0002:01:00.0
+ *   0x18000000 pcie3 (x2, gpio32)  OK - radio, PCI domain 3 -> 0003:01:00.0
+ * QCN9000-class PCIe slots and the internal AHB radio family are disabled at
+ * the factory; the enabled set is exactly the 3x QCN9224-class radios below,
+ * consistent with the R2 finding (3x PCIe QCN92xx sharing a WSI chain and
+ * /dev/ttyMSM2 for the EFR32MG21 BT uart, unrelated to the wifi PCIe lanes).
+ *
+ * WSI [OEM]: node "wsi { id=<0>; num_chip=<3>; }" - three chips in one ring.
+ * The per-radio wsi_index/controller/port wiring below follows [REF]
+ * (ipq9574-rdp433.dts, the AP-AL02-C4 reference the vendor FDT derives from):
+ * pcie2 radio is the WSI controller (index 0), pcie3 index 1, pcie1 index 2;
+ * the endpoint ring is wifi1->wifi2->wifi3->wifi1 (identical to [COMM]).
+ *
+ * Per-radio calibration (QSDK14 qcom,caldata_offset form, offsets = [ART]
+ * radio blocks; board_id values = [OEM] wifi5/6/7 board_id and match the
+ * Askey-SBE1V1K_{1,4,2} calibration-variant naming used by ath12k in [COMM]):
+ *   pcie1 radio: ART 0x58800, board_id 1, variant Askey-SBE1V1K_1, MAC base-3
+ *   pcie2 radio: ART 0x8a800, board_id 4, variant Askey-SBE1V1K_4, MAC base-1
+ *   pcie3 radio: ART 0xbc800, board_id 2, variant Askey-SBE1V1K_2, MAC base-2
+ * qcom,caldb_offset 0x1e00000 = [OEM] absolute caldb-addr minus the radio's
+ * qcn9224_pcieN window base (0x52d00000-0x50f00000 etc., identical for all
+ * three); [REF] uses 0x1100000 with a different window layout - the derived
+ * value is the board-specific one.
+ *
+ * Firmware/BDF wiring (verified against this tree, 2026-11-05):
+ *   - The wifi driver that ships with the QSDK14 ipq95xx open profile is
+ *     ath12k from the qca/feeds/wlan-open mac80211 package
+ *     (backports-6.1-9a0dddfb3); it probes via PCI (QCN9274_DEVICE_ID
+ *     0x1109) and reads several of the wifi@0 DT properties below
+ *     (boot-args, memory-region, qcom,wsi/qcom,wsi_index/qcom,wsi-controller).
+ *   - A wlan-open feed patch ("ath12k: Add fix to fetch board-id from dts")
+ *     makes it read "qcom,board_id" from this node and use it as the QMI
+ *     board id.  The per-radio board-2.bin BOARD names therefore resolve as
+ *     bus=pci,qmi-chip-id=<c>,qmi-board-id=1|4|2 with the values below;
+ *     <c> is the QMI-reported chip id (0 for this radio family per [COMM],
+ *     confirm at bring-up with the "boot using board name" debug line).
+ *   - "qcom,calibration-variant" is NOT consumed by this ath12k (its bdf_ext
+ *     only comes from ACPI/SMBIOS in this tree) - do not add it here.
+ *   - The [COMM] cal-pci-000X:01:00.0.bin hotplug naming is not implemented
+ *     by this ath12k; board-2.bin IE naming is the BDF mechanism.  The
+ *     per-radio BDF is generated from the [ART] blocks by
+ *     package/firmware/orangeyoo-sbe1v1k-bdf and installed into
+ *     /lib/firmware/ath12k/<fw.dir>/board-2.bin.
+ *   - Radio MACs live inside the [ART] calibration blocks (base-3/-1/-2 =
+ *     ...8e/...:90/...:8f) and reach the firmware through that board-2.bin;
+ *     this ath12k does not read a DT mac-address/nvmem cell.
+ *   - MHI firmware (amss.bin/m3.bin) must exist in the matched hw fw.dir
+ *     (QCN9274/hw1.0, QCN92XX/hw1.0 or WCN7850/hw2.0 depending on the
+ *     radio's SoC hw version at probe time); ath12k-firmware-wcn7850 covers
+ *     WCN7850/hw2.0 only - QCN9274-family amss provisioning is a bring-up
+ *     TODO (candidate source: the factory 0:WIFIFW partition, p23).
+ */
+
+&wsi {
+	id = <0>;
+	num_chip = <3>;
+	status = "okay";
+	/*
+	 * [REF] per-chip WSI port wiring of the AP-AL02-C4 3-chip ring; the
+	 * [OEM] FDT declares only id/num_chip and relies on the reference
+	 * defaults. Kept explicit so the ring topology is reviewable.
+	 */
+	chip_info = <0 2 1 2>,
+		    <1 2 2 0>,
+		    <2 2 0 1>;
+};
+
+&pcie1_phy {
+	status = "okay";
+};
+
+&pcie1_x1 {
+	pinctrl-0 = <&pcie1_default>;
+	pinctrl-names = "default";
+	perst-gpios = <&tlmm 26 GPIO_ACTIVE_LOW>;
+	status = "okay";
+
+	pcie@0 {
+		device_type = "pci";
+		reg = <0x0 0x0 0x0 0x0 0x0>;
+		#address-cells = <3>;
+		#size-cells = <2>;
+		ranges;
+
+		wifi@0 {
+			reg = <0x0 0x0 0x0 0x0 0x0>;
+
+			/* [OEM]/[REF] identical boot-args */
+			boot-args = <0x2 0x4 0x34 0x3 0x0 0x0
+				     0x4 0x4 0x18 0x3 0x0 0x0
+				     0x0 0x4 0x0 0x0 0x0 0x0>;
+
+			memory-region = <&qcn9224_pcie1>, <&mhi_region1>,
+					<&mlo_global_mem0>;
+			memory-region-names = "host-ddr-mem", "mhi-region",
+					      "mlo-global-mem";
+
+			qcom,early_cal_enabled = "disabled";
+			/* [b3] QMI host_cap mem_cfg_mode: 0 = full layout
+			 * (hremote 0x1c00000 + pageable 0xc00000, the native
+			 * [OEM]/FW build layout).  Driver default 1 = 512M
+			 * profile shrinks FW memory and precedes every
+			 * phyrf_bdf_v2.c:604 mission-mode assert; see the
+			 * b3 wifi-bdf report. */
+			qcom,tgt_mem_mode = <0x0>;
+			/* [ART] radio 1 calibration block */
+			qcom,caldata_offset = <0x58800>;
+			qcom,caldb_offset = <0x1e00000>;
+			qcom,caldb_size = <0x800000>;
+			qcom,board_id = <0x01>;
+
+			qcom,wsi = <&wsi>;
+			qcom,wsi_index = <2>;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+
+					wifi1_wsi_tx: endpoint {
+						remote-endpoint = <&wifi2_wsi_rx>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+
+					wifi1_wsi_rx: endpoint {
+						remote-endpoint = <&wifi3_wsi_tx>;
+					};
+				};
+			};
+		};
+	};
+};
+
+&pcie2_phy {
+	status = "okay";
+};
+
+&pcie2_x2 {
+	pinctrl-0 = <&pcie2_default>;
+	pinctrl-names = "default";
+	perst-gpios = <&tlmm 29 GPIO_ACTIVE_LOW>;
+	status = "okay";
+
+	pcie@0 {
+		device_type = "pci";
+		reg = <0x0 0x0 0x0 0x0 0x0>;
+		#address-cells = <3>;
+		#size-cells = <2>;
+		ranges;
+
+		wifi@0 {
+			reg = <0x0 0x0 0x0 0x0 0x0>;
+
+			boot-args = <0x2 0x4 0x34 0x3 0x0 0x0
+				     0x4 0x4 0x18 0x3 0x0 0x0
+				     0x0 0x4 0x0 0x0 0x0 0x0>;
+
+			memory-region = <&qcn9224_pcie2>, <&mhi_region2>,
+					<&mlo_global_mem0>;
+			memory-region-names = "host-ddr-mem", "mhi-region",
+					      "mlo-global-mem";
+
+			qcom,early_cal_enabled = "disabled";
+			/* [b3] QMI host_cap mem_cfg_mode: 0 = full layout
+			 * (hremote 0x1c00000 + pageable 0xc00000, the native
+			 * [OEM]/FW build layout).  Driver default 1 = 512M
+			 * profile shrinks FW memory and precedes every
+			 * phyrf_bdf_v2.c:604 mission-mode assert; see the
+			 * b3 wifi-bdf report. */
+			qcom,tgt_mem_mode = <0x0>;
+			/* [ART] radio 2 calibration block (WSI controller) */
+			qcom,caldata_offset = <0x8a800>;
+			qcom,caldb_offset = <0x1e00000>;
+			qcom,caldb_size = <0x800000>;
+			qcom,board_id = <0x04>;
+
+			qcom,wsi = <&wsi>;
+			qcom,wsi_index = <0>;
+			qcom,wsi-controller;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+
+					wifi2_wsi_tx: endpoint {
+						remote-endpoint = <&wifi3_wsi_rx>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+
+					wifi2_wsi_rx: endpoint {
+						remote-endpoint = <&wifi1_wsi_tx>;
+					};
+				};
+			};
+		};
+	};
+};
+
+&pcie3_phy {
+	status = "okay";
+};
+
+&pcie3_x2 {
+	pinctrl-0 = <&pcie3_default>;
+	pinctrl-names = "default";
+	perst-gpios = <&tlmm 32 GPIO_ACTIVE_LOW>;
+	status = "okay";
+
+	pcie@0 {
+		device_type = "pci";
+		reg = <0x0 0x0 0x0 0x0 0x0>;
+		#address-cells = <3>;
+		#size-cells = <2>;
+		ranges;
+
+		wifi@0 {
+			reg = <0x0 0x0 0x0 0x0 0x0>;
+
+			boot-args = <0x2 0x4 0x34 0x3 0x0 0x0
+				     0x4 0x4 0x18 0x3 0x0 0x0
+				     0x0 0x4 0x0 0x0 0x0 0x0>;
+
+			memory-region = <&qcn9224_pcie3>, <&mhi_region3>,
+					<&mlo_global_mem0>;
+			memory-region-names = "host-ddr-mem", "mhi-region",
+					      "mlo-global-mem";
+
+			qcom,early_cal_enabled = "disabled";
+			/* [b3] QMI host_cap mem_cfg_mode: 0 = full layout
+			 * (hremote 0x1c00000 + pageable 0xc00000, the native
+			 * [OEM]/FW build layout).  Driver default 1 = 512M
+			 * profile shrinks FW memory and precedes every
+			 * phyrf_bdf_v2.c:604 mission-mode assert; see the
+			 * b3 wifi-bdf report. */
+			qcom,tgt_mem_mode = <0x0>;
+			/* [ART] radio 3 calibration block */
+			qcom,caldata_offset = <0xbc800>;
+			qcom,caldb_offset = <0x1e00000>;
+			qcom,caldb_size = <0x800000>;
+			qcom,board_id = <0x02>;
+
+			qcom,wsi = <&wsi>;
+			qcom,wsi_index = <1>;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+
+					wifi3_wsi_tx: endpoint {
+						remote-endpoint = <&wifi1_wsi_rx>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+
+					wifi3_wsi_rx: endpoint {
+						remote-endpoint = <&wifi2_wsi_tx>;
+					};
+				};
+			};
+		};
+	};
+};
+
+/*
+ * [b3] [OEM] cnss wrapper enable for the three QCN9224 PCIe radios
+ * (dtsi defines the full binding; RDP433-style override pattern).
+ * Memory layout = [OEM] FDT values: hremote 0x1c00000 + caldb 0x800000
+ * + m3/etr 1MB + pageable 0xc00000 per 50MiB window, tgt-mem-mode 0 -
+ * the native layout of the shipped WBE firmware.  Without it the
+ * runtime cnss stack defaults to the 512M profile (mode 1) and the
+ * firmware asserts phyrf_bdf_v2.c:604 at mission-mode BDF parse.
+ */
+&wifi5 {
+	hremote_node = <&qcn9224_pcie1>;
+	board_id = <0x01>;
+	hw_link_id = <0 0>;
+	base-addr = <0x50f00000>;
+	m3-dump-addr = <0x52b00000>;
+	etr-addr = <0x52c00000>;
+	caldb-addr = <0x52d00000>;
+	pageable-addr = <0x53500000>;
+	hremote-size = <0x1c00000>;
+	pageable-size = <0xc00000>;
+	tgt-mem-mode = <0x00>;
+	caldb-size = <0x800000>;
+	status = "okay";
+};
+
+&wifi6 {
+	hremote_node = <&qcn9224_pcie2>;
+	board_id = <0x04>;
+	hw_link_id = <1 0>;
+	base-addr = <0x54100000>;
+	m3-dump-addr = <0x55d00000>;
+	etr-addr = <0x55e00000>;
+	caldb-addr = <0x55f00000>;
+	pageable-addr = <0x56700000>;
+	hremote-size = <0x1c00000>;
+	pageable-size = <0xc00000>;
+	tgt-mem-mode = <0x00>;
+	caldb-size = <0x800000>;
+	status = "okay";
+};
+
+&wifi7 {
+	hremote_node = <&qcn9224_pcie3>;
+	board_id = <0x02>;
+	hw_link_id = <2 0>;
+	base-addr = <0x57300000>;
+	m3-dump-addr = <0x58f00000>;
+	etr-addr = <0x59000000>;
+	caldb-addr = <0x59100000>;
+	pageable-addr = <0x59900000>;
+	hremote-size = <0x1c00000>;
+	pageable-size = <0xc00000>;
+	tgt-mem-mode = <0x00>;
+	caldb-size = <0x800000>;
+	status = "okay";
+};
+
+/*
+ * [OEM] alignment, full FDT audit 2026-11-15 (/work/wire-audit/full-20261115,
+ * every vendor node/property diffed against this tree's compiled FDT).
+ */
+
+/* [OEM] tlmm: gpio59 is reserved (TZ-owned); blsp4 i2c pins for the sensor */
+&tlmm {
+	gpio-reserved-ranges = <59 1>;
+
+	i2c4_pins: i2c-4-state {
+		mux_0 {
+			pins = "gpio50", "gpio51";
+			function = "blsp4_i2c";
+			drive-strength = <8>;
+			bias-disable;
+		};
+
+		mux_1 {
+			pins = "gpio20";
+			function = "gpio";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+	};
+};
+
+/*
+ * [OEM] i2c@78b9000 at 400kHz with a Bosch BMP5xx pressure/temperature
+ * sensor at 0x46 (vendor driver "bmp5xy"; mainline bmp280 driver, built in,
+ * binds it as bosch,bmp580).
+ */
+&blsp1_i2c4 {
+	clock-frequency = <400000>;
+	pinctrl-0 = <&i2c4_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	pressure-sensor@46 {
+		compatible = "bosch,bmp580";
+		reg = <0x46>;
+	};
+};
+
+/*
+ * [OEM] PPE port scheduler/queue allocation, verbatim from the vendor FDT
+ * (replaces the QSDK14 ipq9574.dtsi default table). The EDMA loopback ring
+ * below uses unicast queues 56-63 of port 0 from this table.
+ */
+&ess_switch {
+	/delete-node/ port_scheduler_resource;
+	/delete-node/ port_scheduler_config;
+
+	port_scheduler_resource {
+						port@0 {
+							port_id = <0x00>;
+							ucast_queue = <0x00 0x3f>;
+							mcast_queue = <0x100 0x107>;
+							l0sp = <0x00 0x00>;
+							l0cdrr = <0x00 0x07>;
+							l0edrr = <0x00 0x07>;
+							l1cdrr = <0x00 0x00>;
+							l1edrr = <0x00 0x00>;
+						};
+						port@1 {
+							port_id = <0x01>;
+							ucast_queue = <0xcc 0xd3>;
+							mcast_queue = <0x110 0x113>;
+							l0sp = <0x33 0x34>;
+							l0cdrr = <0x6c 0x73>;
+							l0edrr = <0x6c 0x73>;
+							l1cdrr = <0x17 0x18>;
+							l1edrr = <0x17 0x18>;
+						};
+						port@2 {
+							port_id = <0x02>;
+							ucast_queue = <0xd4 0xdb>;
+							mcast_queue = <0x114 0x117>;
+							l0sp = <0x35 0x36>;
+							l0cdrr = <0x74 0x7b>;
+							l0edrr = <0x74 0x7b>;
+							l1cdrr = <0x19 0x1a>;
+							l1edrr = <0x19 0x1a>;
+						};
+						port@3 {
+							port_id = <0x03>;
+							ucast_queue = <0xdc 0xe3>;
+							mcast_queue = <0x118 0x11b>;
+							l0sp = <0x37 0x38>;
+							l0cdrr = <0x7c 0x83>;
+							l0edrr = <0x7c 0x83>;
+							l1cdrr = <0x1b 0x1c>;
+							l1edrr = <0x1b 0x1c>;
+						};
+						port@4 {
+							port_id = <0x04>;
+							ucast_queue = <0xe4 0xeb>;
+							mcast_queue = <0x11c 0x11f>;
+							l0sp = <0x39 0x3a>;
+							l0cdrr = <0x84 0x8b>;
+							l0edrr = <0x84 0x8b>;
+							l1cdrr = <0x1d 0x1e>;
+							l1edrr = <0x1d 0x1e>;
+						};
+						port@5 {
+							port_id = <0x05>;
+							ucast_queue = <0xec 0xf3>;
+							mcast_queue = <0x120 0x123>;
+							l0sp = <0x3b 0x3c>;
+							l0cdrr = <0x8c 0x93>;
+							l0edrr = <0x8c 0x93>;
+							l1cdrr = <0x1f 0x20>;
+							l1edrr = <0x1f 0x20>;
+						};
+						port@6 {
+							port_id = <0x06>;
+							ucast_queue = <0xf4 0xfb>;
+							mcast_queue = <0x124 0x127>;
+							l0sp = <0x3d 0x3e>;
+							l0cdrr = <0x94 0x9b>;
+							l0edrr = <0x94 0x9b>;
+							l1cdrr = <0x21 0x22>;
+							l1edrr = <0x21 0x22>;
+						};
+						port@7 {
+							port_id = <0x07>;
+							ucast_queue = <0xfc 0xff>;
+							mcast_queue = <0x128 0x12b>;
+							l0sp = <0x3f 0x3f>;
+							l0cdrr = <0x9c 0x9f>;
+							l0edrr = <0x9c 0x9f>;
+							l1cdrr = <0x23 0x23>;
+							l1edrr = <0x23 0x23>;
+						};
+						reserved {
+							ucast_queue = <0x40 0xcb>;
+							mcast_queue = <0x108 0x10f>;
+							l0sp = <0x01 0x32>;
+							l0cdrr = <0x08 0x6b>;
+							l0edrr = <0x08 0x6b>;
+							l1cdrr = <0x01 0x16>;
+							l1edrr = <0x01 0x16>;
+						};
+					};
+
+	port_scheduler_config {
+						port@0 {
+							port_id = <0x00>;
+							l1scheduler {
+								group@0 {
+									sp = <0x00>;
+									cfg = <0x00 0x00 0x00 0x00>;
+								};
+							};
+							l0scheduler {
+								group@0 {
+									ucast_queue = <0x00>;
+									ucast_loop_pri = <0x08>;
+									mcast_queue = <0x100>;
+									cfg = <0x00 0x00 0x00 0x00 0x00>;
+								};
+								group@1 {
+									ucast_queue = <0x08>;
+									ucast_loop_pri = <0x08>;
+									mcast_queue = <0x101>;
+									cfg = <0x00 0x00 0x00 0x00 0x00>;
+								};
+								group@2 {
+									ucast_queue = <0x10>;
+									ucast_loop_pri = <0x08>;
+									mcast_queue = <0x102>;
+									cfg = <0x00 0x00 0x00 0x00 0x00>;
+								};
+								group@3 {
+									ucast_queue = <0x18>;
+									ucast_loop_pri = <0x08>;
+									mcast_queue = <0x103>;
+									cfg = <0x00 0x00 0x00 0x00 0x00>;
+								};
+								group@4 {
+									ucast_queue = <0x20>;
+									ucast_loop_pri = <0x08>;
+									mcast_queue = <0x104>;
+									cfg = <0x00 0x00 0x00 0x00 0x00>;
+								};
+								group@5 {
+									ucast_queue = <0x28>;
+									ucast_loop_pri = <0x08>;
+									mcast_queue = <0x105>;
+									cfg = <0x00 0x00 0x00 0x00 0x00>;
+								};
+								group@6 {
+									ucast_queue = <0x30>;
+									ucast_loop_pri = <0x08>;
+									mcast_queue = <0x106>;
+									cfg = <0x00 0x00 0x00 0x00 0x00>;
+								};
+								group@7 {
+									ucast_queue = <0x38>;
+									ucast_loop_pri = <0x08>;
+									mcast_queue = <0x107>;
+									cfg = <0x00 0x00 0x00 0x00 0x00>;
+								};
+							};
+						};
+						port@1 {
+							port_id = <0x01>;
+							l1scheduler {
+								group@0 {
+									sp = <0x33>;
+									cfg = <0x00 0x17 0x00 0x17>;
+								};
+								group@1 {
+									sp = <0x34>;
+									cfg = <0x01 0x18 0x01 0x18>;
+								};
+							};
+							l0scheduler {
+								group@0 {
+									ucast_queue = <0xcc>;
+									ucast_loop_pri = <0x08>;
+									ucast_max_pri = <0x04>;
+									mcast_queue = <0x110>;
+									mcast_loop_pri = <0x04>;
+									cfg = <0x33 0x00 0x6c 0x00 0x6c>;
+								};
+							};
+						};
+						port@2 {
+							port_id = <0x02>;
+							l1scheduler {
+								group@0 {
+									sp = <0x35>;
+									cfg = <0x00 0x19 0x00 0x19>;
+								};
+								group@1 {
+									sp = <0x36>;
+									cfg = <0x01 0x1a 0x01 0x1a>;
+								};
+							};
+							l0scheduler {
+								group@0 {
+									ucast_queue = <0xd4>;
+									ucast_loop_pri = <0x08>;
+									ucast_max_pri = <0x04>;
+									mcast_queue = <0x114>;
+									mcast_loop_pri = <0x04>;
+									cfg = <0x35 0x00 0x74 0x00 0x74>;
+								};
+							};
+						};
+						port@3 {
+							port_id = <0x03>;
+							l1scheduler {
+								group@0 {
+									sp = <0x37>;
+									cfg = <0x00 0x1b 0x00 0x1b>;
+								};
+								group@1 {
+									sp = <0x38>;
+									cfg = <0x01 0x1c 0x01 0x1c>;
+								};
+							};
+							l0scheduler {
+								group@0 {
+									ucast_queue = <0xdc>;
+									ucast_loop_pri = <0x08>;
+									ucast_max_pri = <0x04>;
+									mcast_queue = <0x118>;
+									mcast_loop_pri = <0x04>;
+									cfg = <0x37 0x00 0x7c 0x00 0x7c>;
+								};
+							};
+						};
+						port@4 {
+							port_id = <0x04>;
+							l1scheduler {
+								group@0 {
+									sp = <0x39>;
+									cfg = <0x00 0x1d 0x00 0x1d>;
+								};
+								group@1 {
+									sp = <0x3a>;
+									cfg = <0x01 0x1e 0x01 0x1e>;
+								};
+							};
+							l0scheduler {
+								group@0 {
+									ucast_queue = <0xe4>;
+									ucast_loop_pri = <0x08>;
+									ucast_max_pri = <0x04>;
+									mcast_queue = <0x11c>;
+									mcast_loop_pri = <0x04>;
+									cfg = <0x39 0x00 0x84 0x00 0x84>;
+								};
+							};
+						};
+						port@5 {
+							port_id = <0x05>;
+							l1scheduler {
+								group@0 {
+									sp = <0x3b>;
+									cfg = <0x00 0x1f 0x00 0x1f>;
+								};
+								group@1 {
+									sp = <0x3c>;
+									cfg = <0x01 0x20 0x01 0x20>;
+								};
+							};
+							l0scheduler {
+								group@0 {
+									ucast_queue = <0xec>;
+									ucast_loop_pri = <0x08>;
+									ucast_max_pri = <0x04>;
+									mcast_queue = <0x120>;
+									mcast_loop_pri = <0x04>;
+									cfg = <0x3b 0x00 0x8c 0x00 0x8c>;
+								};
+							};
+						};
+						port@6 {
+							port_id = <0x06>;
+							l1scheduler {
+								group@0 {
+									sp = <0x3d>;
+									cfg = <0x00 0x21 0x00 0x21>;
+								};
+								group@1 {
+									sp = <0x3e>;
+									cfg = <0x01 0x22 0x01 0x22>;
+								};
+							};
+							l0scheduler {
+								group@0 {
+									ucast_queue = <0xf4>;
+									ucast_loop_pri = <0x08>;
+									ucast_max_pri = <0x04>;
+									mcast_queue = <0x124>;
+									mcast_loop_pri = <0x04>;
+									cfg = <0x3d 0x00 0x94 0x00 0x94>;
+								};
+							};
+						};
+						port@7 {
+							port_id = <0x07>;
+							l1scheduler {
+								group@0 {
+									sp = <0x3f>;
+									cfg = <0x00 0x23 0x00 0x23>;
+								};
+							};
+							l0scheduler {
+								group@0 {
+									ucast_queue = <0xfc>;
+									ucast_loop_pri = <0x04>;
+									ucast_max_pri = <0x04>;
+									mcast_queue = <0x128>;
+									mcast_loop_pri = <0x04>;
+									cfg = <0x3f 0x00 0x9c 0x00 0x9c>;
+								};
+							};
+						};
+					};
+};
+
+/* [OEM] EDMA loopback ring (one ring, queues 56-63) */
+&{/soc@0/edma@3ab00000} {
+	qcom,num_loopback_rings = <1>;
+	qcom,txdesc_loopback_ring_id = <0>;
+	qcom,txcmpl_loopback_ring_id = <0>;
+	qcom,rxfill_loopback_ring_id = <0>;
+	qcom,rxdesc_loopback_ring_id = <0>;
+	qcom,loopback_queue_base = <56>;
+	qcom,loopback_num_queues = <8>;
+};
+
+/* [OEM] eip197 rx interrupt CPUs: dma0-3 -> cpu3,2,1,0 (dma4-7 unchanged) */
+&eip {
+	dma0 {
+		rx_cpu = /bits/ 8 <3>;
+	};
+
+	dma1 {
+		rx_cpu = /bits/ 8 <2>;
+	};
+
+	dma2 {
+		rx_cpu = /bits/ 8 <1>;
+	};
+
+	dma3 {
+		rx_cpu = /bits/ 8 <0>;
+	};
+};

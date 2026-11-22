@@ -1,0 +1,33 @@
+From 62b78b5ed1e558cbab81218030efa5a2869cffaf Mon Sep 17 00:00:00 2001
+From: Sridharan S N <sridsn@qti.qualcomm.com>
+Date: Fri, 24 Apr 2026 16:01:23 +0530
+Subject: [PATCH] cpufreq: qcom-cpufreq-nvmem: Add new SoC IDs for IPQ9xx
+ family
+
+Change-Id: I3b93b8c84124add551f0f57c9efe80c6d548fcfb
+Signed-off-by: Sridharan S N <sridsn@qti.qualcomm.com>
+---
+ drivers/cpufreq/qcom-cpufreq-nvmem.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/cpufreq/qcom-cpufreq-nvmem.c b/drivers/cpufreq/qcom-cpufreq-nvmem.c
+index a80f55ad9152..ef4618157f01 100644
+--- a/drivers/cpufreq/qcom-cpufreq-nvmem.c
++++ b/drivers/cpufreq/qcom-cpufreq-nvmem.c
+@@ -176,8 +176,12 @@ static int qcom_cpufreq_kryo_name_version(struct device *cpu_dev,
+ 	case QCOM_ID_QCF3210:
+ 		drv->versions =  (~(*speedbin) != 0x32) ? BIT(0) : BIT(1);
+ 		break;
+-	case QCOM_ID_IPQ9650:
++	case QCOM_ID_IPQ9610:
+ 	case QCOM_ID_IPQ9620:
++	case QCOM_ID_IPQ9630:
++	case QCOM_ID_IPQ9640:
++	case QCOM_ID_IPQ9650:
++	case QCOM_ID_IPQ9670:
+ 		drv->versions =  (*speedbin != 0x4b) ? BIT(0) : BIT(1);
+ 		break;
+ 	case QCOM_ID_MSM8996SG:
+-- 
+2.34.1
+

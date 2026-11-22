@@ -1,0 +1,35 @@
+From 41b2cdb0e9e5c47d29276f6898061e1d14dd3525 Mon Sep 17 00:00:00 2001
+From: Timple Raj M <timple@qti.qualcomm.com>
+Date: Mon, 27 Apr 2026 02:03:25 +0530
+Subject: [PATCH] mtd: rawnand: add Winbond W25N02LW SPI NAND
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Add NAND ID support for the Winbond W25N02LW 2‑Gb
+(256‑MiB) 1.8‑V SPI NAND device.
+
+Change-Id: Ib4ff9cb3d74fc7de2c47ce7a263249dc3558c0f8
+Signed-off-by: Timple Raj M <timple@qti.qualcomm.com>
+---
+ drivers/mtd/nand/raw/nand_ids.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/mtd/nand/raw/nand_ids.c b/drivers/mtd/nand/raw/nand_ids.c
+index ebd1b0ec642d..d0a7f4cee454 100644
+--- a/drivers/mtd/nand/raw/nand_ids.c
++++ b/drivers/mtd/nand/raw/nand_ids.c
+@@ -148,6 +148,10 @@ struct nand_flash_dev nand_flash_ids[] = {
+ 		{ .id = {0xef, 0xba, 0x20} },
+ 		SZ_2K, SZ_64, SZ_128K, 0, 3, 64, NAND_ECC_INFO(4, SZ_512)},
+ 
++	{"W25N02LW SPI NAND 2G 1.8V",
++		{ .id = {0xef, 0x12, 0x22} },
++		SZ_2K, SZ_256, SZ_128K, 0, 3, 128, NAND_ECC_INFO(8, SZ_512)},
++
+ 	{"MX35UF1G24AD SPI NAND 1G 1.8V",
+ 		{ .id = {0xc2, 0x94} },
+ 		SZ_2K, SZ_128, SZ_128K, 0, 2, 128, NAND_ECC_INFO(8, SZ_512)},
+-- 
+2.34.1
+
