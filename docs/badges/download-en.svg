@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="264" height="28" role="img" aria-label="Download: AutoFlash Tool">
+  <title>Download: AutoFlash Tool</title>
+  <g shape-rendering="crispEdges">
+    <rect width="108" height="28" fill="#555"/>
+    <rect x="108" width="156" height="28" fill="#0e70c0"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="140">
+    <text transform="scale(.1)" x="540.0" y="192" textLength="880" font-weight="bold">Download</text>
+    <text transform="scale(.1)" x="1860.0" y="192" textLength="1360" font-weight="bold">AutoFlash Tool</text>
+  </g>
+</svg>

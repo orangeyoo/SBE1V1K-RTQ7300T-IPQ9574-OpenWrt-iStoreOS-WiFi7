@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="177" height="20" role="img" aria-label="QSDK 14: OpenWrt 24.10">
+  <title>QSDK 14: OpenWrt 24.10</title>
+  <g shape-rendering="crispEdges">
+    <rect width="68" height="20" fill="#555"/>
+    <rect x="68" width="109" height="20" fill="#0099FF"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110">
+    <text transform="scale(.1)" x="340.0" y="150" textLength="580">QSDK 14</text>
+    <text transform="scale(.1)" x="1225.0" y="150" textLength="990">OpenWrt 24.10</text>
+  </g>
+</svg>

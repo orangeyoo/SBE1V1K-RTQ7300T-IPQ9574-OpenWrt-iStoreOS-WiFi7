@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="147" height="20" role="img" aria-label="iStoreOS: iStore 商店">
+  <title>iStoreOS: iStore 商店</title>
+  <g shape-rendering="crispEdges">
+    <rect width="67" height="20" fill="#555"/>
+    <rect x="67" width="80" height="20" fill="#FF6600"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110">
+    <text transform="scale(.1)" x="335.0" y="150" textLength="570">iStoreOS</text>
+    <text transform="scale(.1)" x="1070.0" y="150" textLength="700">iStore 商店</text>
+  </g>
+</svg>

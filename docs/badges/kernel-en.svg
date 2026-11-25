@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="177" height="20" role="img" aria-label="kernel: 6.6.116 · ath12k">
+  <title>kernel: 6.6.116 · ath12k</title>
+  <g shape-rendering="crispEdges">
+    <rect width="50" height="20" fill="#555"/>
+    <rect x="50" width="127" height="20" fill="#97ca00"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110">
+    <text transform="scale(.1)" x="250.0" y="150" textLength="400">kernel</text>
+    <text transform="scale(.1)" x="1135.0" y="150" textLength="1170">6.6.116 · ath12k</text>
+  </g>
+</svg>

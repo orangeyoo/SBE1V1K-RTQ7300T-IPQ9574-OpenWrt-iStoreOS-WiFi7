@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="163" height="20" role="img" aria-label="Wi-Fi 7: 三频 QCN9224">
+  <title>Wi-Fi 7: 三频 QCN9224</title>
+  <g shape-rendering="crispEdges">
+    <rect width="60" height="20" fill="#555"/>
+    <rect x="60" width="103" height="20" fill="#8A2BE2"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110">
+    <text transform="scale(.1)" x="300.0" y="150" textLength="500">Wi-Fi 7</text>
+    <text transform="scale(.1)" x="1115.0" y="150" textLength="930">三频 QCN9224</text>
+  </g>
+</svg>

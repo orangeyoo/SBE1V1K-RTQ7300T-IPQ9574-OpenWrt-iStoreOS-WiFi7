@@ -1,0 +1,40 @@
+name: Refresh README badges
+
+# Keeps docs/badges/release-*.svg and downloads-*.svg in sync so the README
+# badges are plain static images (no shields.io / GitHub-API dependency at
+# view time). Static badges are regenerated too; the run is a no-op when
+# nothing changed.
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: "17 21 * * *" # daily 21:17 UTC = 05:17 Beijing time
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  badges:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Regenerate badges
+        run: python3 docs/badges/gen.py --dynamic
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/badges
+          if git diff --cached --quiet; then
+            echo "badges up to date"
+          else
+            git commit -m "chore(badges): refresh release/downloads badges [skip ci]"
+            git push
+          fi

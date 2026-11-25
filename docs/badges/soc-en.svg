@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="20" role="img" aria-label="SoC: Qualcomm IPQ9574">
+  <title>SoC: Qualcomm IPQ9574</title>
+  <g shape-rendering="crispEdges">
+    <rect width="36" height="20" fill="#555"/>
+    <rect x="36" width="144" height="20" fill="#333333"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110">
+    <text transform="scale(.1)" x="180.0" y="150" textLength="260">SoC</text>
+    <text transform="scale(.1)" x="1080.0" y="150" textLength="1340">Qualcomm IPQ9574</text>
+  </g>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="174" height="28" role="img" aria-label="下载: 一键刷机工具">
+  <title>下载: 一键刷机工具</title>
+  <g shape-rendering="crispEdges">
+    <rect width="54" height="28" fill="#555"/>
+    <rect x="54" width="120" height="28" fill="#0e70c0"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="140">
+    <text transform="scale(.1)" x="270.0" y="192" textLength="340" font-weight="bold">下载</text>
+    <text transform="scale(.1)" x="1140.0" y="192" textLength="1000" font-weight="bold">一键刷机工具</text>
+  </g>
+</svg>

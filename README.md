@@ -6,22 +6,25 @@
 
 <p align="center">
   <b>Spectrum SBE1V1K（Askey RTQ7300T）Wi-Fi 7 路由器 · 高通 IPQ9574 + 3× QCN9224</b><br>
-  不拆壳、不接线、不敲命令，按两次 Reset，10 分钟刷好 Wiro iStoreOS 固件
+  不拆壳、不接线、不敲命令，按两次 Reset，10～15 分钟刷好 Wiro iStoreOS 固件
 </p>
 
 <p align="center">
-  <a href="https://wzyp.cn/shop/155QK568"><img src="https://img.shields.io/badge/%E8%B4%AD%E4%B9%B0%E5%88%B7%E6%9C%BA%E5%AF%86%E9%92%A5-%E7%AB%8B%E5%8D%B3%E8%B4%AD%E4%B9%B0-ff5722?style=for-the-badge" alt="购买刷机密钥"></a>
-  <a href="../../releases/latest"><img src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-%E4%B8%80%E9%94%AE%E5%88%B7%E6%9C%BA%E5%B7%A5%E5%85%B7-0e70c0?style=for-the-badge" alt="下载一键刷机工具"></a>
+  <a href="https://wzyp.cn/shop/155QK568"><img src="docs/badges/buy-zh.svg" alt="购买刷机密钥"></a>
+  <a href="../../releases/latest"><img src="docs/badges/download-zh.svg" alt="下载一键刷机工具"></a>
 </p>
 
 <p align="center">
-  <a href="../../releases/latest"><img src="https://img.shields.io/github/v/release/orangeyoo/SBE1V1K-RTQ7300T-IPQ9574-OpenWrt-iStoreOS-WiFi7?style=flat-square&label=%E6%9C%80%E6%96%B0%E7%89%88&cacheSeconds=600" alt="最新版"></a>
-  <a href="../../releases"><img src="https://img.shields.io/github/downloads/orangeyoo/SBE1V1K-RTQ7300T-IPQ9574-OpenWrt-iStoreOS-WiFi7/total?style=flat-square&label=%E4%B8%8B%E8%BD%BD%E9%87%8F&cacheSeconds=600" alt="下载量"></a>
-  <a href="#会员群"><img src="https://img.shields.io/badge/会员群-1061612207-orange?style=flat-square" alt="会员群"></a>
-  <img src="https://img.shields.io/badge/Wi--Fi%207-三频%20QCN9224-8A2BE2?style=flat-square" alt="Wi-Fi 7">
-  <img src="https://img.shields.io/badge/10G-实测%207.72%20Gbps-success?style=flat-square" alt="10G">
-  <img src="https://img.shields.io/badge/OpenWrt%2024.10-Linux%206.6-0099FF?style=flat-square" alt="OpenWrt">
-  <img src="https://img.shields.io/badge/iStoreOS-iStore%20商店-FF6600?style=flat-square" alt="iStoreOS">
+  <a href="../../releases/latest"><img src="docs/badges/release-zh.svg" alt="最新版"></a>
+  <a href="../../releases"><img src="docs/badges/downloads-zh.svg" alt="下载量"></a>
+  <a href="#会员群"><img src="docs/badges/group-zh.svg" alt="会员群"></a>
+  <img src="docs/badges/wifi7-zh.svg" alt="Wi-Fi 7">
+  <img src="docs/badges/soc-zh.svg" alt="SoC">
+  <img src="docs/badges/qsdk-zh.svg" alt="QSDK 14">
+  <img src="docs/badges/kernel-zh.svg" alt="kernel">
+  <img src="docs/badges/10g-zh.svg" alt="10G">
+  <img src="docs/badges/istoreos-zh.svg" alt="iStoreOS">
+  <a href="ATTRIBUTION.md"><img src="docs/badges/license-zh.svg" alt="许可证"></a>
 </p>
 
 <p align="center">
@@ -99,11 +102,15 @@ Wiro 固件把 SBE1V1K 从原厂 Linux 5.4 + 闭源驱动，完整移植到 **�
 | 项目 | 结果 |
 |---|---|
 | 10G 口 电脑 → 路由 | **7.72 Gbps**（4 线程）· 4.70 Gbps（单线程） |
-| 10G 口 路由 → 电脑 | **6.96 Gbps**（8 线程） |
-| 6 GHz Mesh 回程 | 主 → 节点 **1.17 Gbps** · 节点 → 主 0.96 Gbps |
-| 5 GHz 160 MHz | 上传 0.82 Gbps · 下载 0.61 Gbps（协商 2882 Mbps，节点同时承载 Mesh 和其它终端） |
-| 连续运行 | 两台均 21 小时以上不重启，PPPoE 不掉线，无线零崩溃 |
-| 温度 | 日常 54～59 °C，风扇约 2150 rpm |
+| 10G 口 路由 → 电脑 | **6.96 Gbps**（8 线程）· 4.15 Gbps（4 线程） |
+| 10G 口 接交换机 | 正常；主路由 10G 口日常下带一台交换机、3 台设备 |
+| 6 GHz Mesh 回程 | 主 → 节点 **1.17 Gbps** · 节点 → 主 0.96 Gbps（320 MHz 802.11s，8 线程） |
+| 5 GHz 160 MHz | 上传 **0.82 Gbps** · 下载 0.61 Gbps（协商 2882 Mbps，-47 dBm，节点同时承载 Mesh 和其它终端） |
+| 无线崩溃恢复 | 注入 6 GHz 固件断言：该频段约 **8 秒**原地恢复，35 秒重回 Mesh，不重启 |
+| 连续运行 | 两台均 21 小时以上不重启，PPPoE 不掉线（21.5 GB 入 / 10.7 GB 出），无线零崩溃 |
+| 温度 | 日常 54～59 °C，风扇约 2150 rpm，温控调速 |
+
+注：各频段均为单链路 MLD（无跨频聚合）；加密使用高通 QCE 引擎，无 NSS EIP IPsec 卸载；2.5G WAN 满速 PPPoE 测试待补。
 
 ## 常见问题
 
@@ -112,6 +119,8 @@ Wiro 固件把 SBE1V1K 从原厂 Linux 5.4 + 闭源驱动，完整移植到 **�
 
 **问：刷坏了怎么办？**
 答：用配套的 Wiro 救砖可以重装 U-Boot、还原原厂引导区和射频校准数据。刷机中途失败，用同一个密钥重新刷，不计次数。
+
+<p align="center"><img src="docs/images/rescue-main.png" width="620" alt="Wiro 救砖工具"></p>
 
 **问：还能刷回原厂吗？**
 答：刷原厂机时会自动生成救砖包，原厂关键数据都在里面，可以用 Wiro 救砖写回。

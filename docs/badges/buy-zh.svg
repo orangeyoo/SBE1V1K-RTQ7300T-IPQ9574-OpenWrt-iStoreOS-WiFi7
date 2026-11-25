@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="207" height="28" role="img" aria-label="购买刷机密钥: 立即购买">
+  <title>购买刷机密钥: 立即购买</title>
+  <g shape-rendering="crispEdges">
+    <rect width="120" height="28" fill="#555"/>
+    <rect x="120" width="87" height="28" fill="#ff5722"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="140">
+    <text transform="scale(.1)" x="600.0" y="192" textLength="1000" font-weight="bold">购买刷机密钥</text>
+    <text transform="scale(.1)" x="1635.0" y="192" textLength="670" font-weight="bold">立即购买</text>
+  </g>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="241" height="28" role="img" aria-label="Buy Key: Purchase Now">
+  <title>Buy Key: Purchase Now</title>
+  <g shape-rendering="crispEdges">
+    <rect width="94" height="28" fill="#555"/>
+    <rect x="94" width="147" height="28" fill="#ff5722"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="140">
+    <text transform="scale(.1)" x="470.0" y="192" textLength="740" font-weight="bold">Buy Key</text>
+    <text transform="scale(.1)" x="1675.0" y="192" textLength="1270" font-weight="bold">Purchase Now</text>
+  </g>
+</svg>

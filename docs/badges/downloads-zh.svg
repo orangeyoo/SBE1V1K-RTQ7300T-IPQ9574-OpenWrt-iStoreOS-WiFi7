@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="86" height="20" role="img" aria-label="下载量: 115">
+  <title>下载量: 115</title>
+  <g shape-rendering="crispEdges">
+    <rect width="49" height="20" fill="#555"/>
+    <rect x="49" width="37" height="20" fill="#007ec6"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110">
+    <text transform="scale(.1)" x="245.0" y="150" textLength="390">下载量</text>
+    <text transform="scale(.1)" x="675.0" y="150" textLength="270">115</text>
+  </g>
+</svg>

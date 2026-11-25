@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="166" height="20" role="img" aria-label="许可证: GPL-2.0-or-later">
+  <title>许可证: GPL-2.0-or-later</title>
+  <g shape-rendering="crispEdges">
+    <rect width="49" height="20" fill="#555"/>
+    <rect x="49" width="117" height="20" fill="#007ec6"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110">
+    <text transform="scale(.1)" x="245.0" y="150" textLength="390">许可证</text>
+    <text transform="scale(.1)" x="1075.0" y="150" textLength="1070">GPL-2.0-or-later</text>
+  </g>
+</svg>

@@ -1,5 +1,7 @@
 # SBE1V1K 刷机说明
 
+English guide: [FLASHING-GUIDE-EN.md](FLASHING-GUIDE-EN.md)
+
 本文说明怎么把 Wiro 固件刷进 **Spectrum SBE1V1K（Askey RTQ7300T）**。固件和 Wiro U-Boot 都可以从 [Releases](../../releases/latest) 免费下载。按你的情况选一种方式：
 
 | 你的情况 | 方式 | 需要 |

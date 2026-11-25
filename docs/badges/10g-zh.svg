@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="146" height="20" role="img" aria-label="10G: 实测 7.72 Gbps">
+  <title>10G: 实测 7.72 Gbps</title>
+  <g shape-rendering="crispEdges">
+    <rect width="37" height="20" fill="#555"/>
+    <rect x="37" width="109" height="20" fill="#4c1"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110">
+    <text transform="scale(.1)" x="185.0" y="150" textLength="270">10G</text>
+    <text transform="scale(.1)" x="915.0" y="150" textLength="990">实测 7.72 Gbps</text>
+  </g>
+</svg>
